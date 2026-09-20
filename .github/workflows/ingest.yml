@@ -18,6 +18,10 @@ on:
         description: 'Validate input structure only. No model calls, no writes.'
         type: boolean
         default: true
+      offline_upload:
+        description: 'Write the rows to an artifact to upload at /admin/ingest, instead of posting to the site. Required on hosts that refuse server-to-server calls, such as ChatGPT Sites.'
+        type: boolean
+        default: true
 
 # The checkpoint files are shared state; overlapping runs would double-spend and skip items.
 concurrency:
@@ -50,19 +54,23 @@ jobs:
       - name: Collect from the official Hacker News API
         run: |
           if [ "${{ inputs.dry_run }}" = "true" ]; then
-            python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}"               --output data/hn.jsonl --cursor data/hn.dryrun.cursor
+            python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}" \
+              --output data/hn.jsonl --cursor data/hn.dryrun.cursor
           else
-            python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}"               --output data/hn.jsonl --cursor data/hn.cursor
+            python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}" \
+              --output data/hn.jsonl --cursor data/hn.cursor
           fi
 
       - name: Validate structure
         run: python pipeline/index_corpus.py data/hn.jsonl --dry-run --max-documents "${{ inputs.max_documents }}"
 
-      # These four values are easy to confuse. Catch a swap here rather than after paying for
-      # annotation and embeddings, or after a run half-writes Qdrant and 403s on the site.
+      # These values are easy to confuse. Catch a swap here rather than after paying for
+      # annotation and embeddings. Offline delivery never contacts the site, so it needs neither
+      # SITE_URL nor INGEST_TOKEN and the endpoint probe is skipped.
       - name: Preflight secrets
         if: ${{ inputs.dry_run == false }}
         env:
+          OFFLINE: ${{ inputs.offline_upload }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
@@ -72,35 +80,36 @@ jobs:
           python - <<'PY'
           import os, sys
           g = lambda k: (os.environ.get(k) or '').strip()
-          problems = []
-          for k in ('GOOGLE_API_KEY', 'QDRANT_URL', 'QDRANT_API_KEY', 'SITE_URL', 'INGEST_TOKEN'):
-              if not g(k):
-                  problems.append(f'{k} is empty. Add it under Settings > Secrets and variables > Actions.')
+          offline = os.environ.get('OFFLINE') == 'true'
+          needed = ['GOOGLE_API_KEY', 'QDRANT_URL', 'QDRANT_API_KEY']
+          if not offline:
+              needed += ['SITE_URL', 'INGEST_TOKEN']
+          problems = [f'{k} is empty. Add it under Settings > Secrets and variables > Actions.'
+                      for k in needed if not g(k)]
           site, qurl = g('SITE_URL'), g('QDRANT_URL')
-          if site and not site.startswith('https://'):
-              problems.append(f'SITE_URL must start with https:// (got {site[:30]!r})')
-          if site and 'qdrant' in site.lower():
-              problems.append('SITE_URL looks like the Qdrant cluster address. It is the address of '
-                              'your deployed VMAX site, where /api/ingest lives. The Qdrant address '
-                              'belongs in QDRANT_URL.')
           if qurl and not qurl.startswith('https://'):
               problems.append(f'QDRANT_URL must start with https:// (got {qurl[:30]!r})')
-          if site and qurl and site.rstrip('/') == qurl.rstrip('/'):
-              problems.append('SITE_URL and QDRANT_URL are the same value; they are different services.')
-          if g('INGEST_TOKEN') and g('INGEST_TOKEN') == g('QDRANT_API_KEY'):
-              problems.append('INGEST_TOKEN equals QDRANT_API_KEY. INGEST_TOKEN is a token you '
-                              'generate yourself and set identically on the deployed site; it is not '
-                              'a Qdrant credential.')
+          if not offline:
+              if site and not site.startswith('https://'):
+                  problems.append(f'SITE_URL must start with https:// (got {site[:30]!r})')
+              if site and 'qdrant' in site.lower():
+                  problems.append('SITE_URL looks like the Qdrant cluster address. It is the address '
+                                  'of your deployed VMAX site, where /api/ingest lives.')
+              if g('INGEST_TOKEN') and g('INGEST_TOKEN') == g('QDRANT_API_KEY'):
+                  problems.append('INGEST_TOKEN equals QDRANT_API_KEY. INGEST_TOKEN is a token you '
+                                  'generate yourself and set identically on the deployed site.')
           if problems:
               for p in problems:
                   print(f'::error::{p}')
               sys.exit(1)
-          print('secrets look consistent')
+          print('offline delivery: rows go to an artifact' if offline else 'secrets look consistent')
 
-          # Free reachability probe. The app returns 401 for a bad INGEST_TOKEN (admin() falls
-          # through to user()) and 400 for an accepted token with an empty body. Its only 403 is
-          # sameOrigin(), which needs an Origin header we do not send. So a 403 here means the
-          # request never reached the app and something in front of the site rejected it.
+          if offline:
+              sys.exit(0)
+
+          # The app answers 401 for a bad INGEST_TOKEN and 400 for an accepted one with an empty
+          # body. Its only 403 is sameOrigin(), which needs an Origin header we do not send, so a
+          # 403 on every path means something in front of the site refused the request.
           import json, urllib.request, urllib.error
 
           def probe(path, token=None, method='GET'):
@@ -116,8 +125,7 @@ jobs:
               except urllib.error.HTTPError as e:
                   return e.code
               except Exception as e:
-                  sys.exit(f'::error::could not reach {site}{path}: {type(e).__name__}. '
-                           f'Check SITE_URL points at your deployed VMAX site.')
+                  sys.exit(f'::error::could not reach {site}{path}: {type(e).__name__}.')
 
           public = probe('/api/status')
           good = probe('/api/ingest', g('INGEST_TOKEN'), 'POST')
@@ -125,22 +133,17 @@ jobs:
           print(f'GET  /api/status  (no auth)     -> {public}')
           print(f'POST /api/ingest  (real token)  -> {good}')
           print(f'POST /api/ingest  (wrong token) -> {bogus}')
-
           if good == 400:
               print('\ntoken accepted; only the empty body was rejected. Ready to index.')
           elif good == bogus and good in (401, 403) and public in (401, 403):
-              sys.exit(f'\n::error::Every path returns {public}, including one needing no auth. The '
-                       f'request is being refused before it reaches the app, so this is the site\'s '
-                       f'access setting, not INGEST_TOKEN. Set the deployment to public, then rerun. '
-                       f'Reads being public is expected: /api/ingest still requires INGEST_TOKEN and '
-                       f'reports and debates still require sign-in.')
-          elif good in (401, 403) and bogus in (401, 403) and good != bogus:
-              sys.exit('\n::error::the app saw the request and rejected this INGEST_TOKEN. Set the '
-                       'SAME value in the deployed site\'s environment variables and redeploy.')
+              sys.exit(f'\n::error::Every path returns {public}, including one needing no auth, so '
+                       f'the host is refusing before the app sees the request. If the host cannot be '
+                       f'made reachable, rerun with offline_upload enabled.')
+          elif good in (401, 403):
+              sys.exit('\n::error::the app rejected this INGEST_TOKEN. Set the SAME value in the '
+                       'deployed site\'s environment variables and redeploy.')
           elif good == 404:
               sys.exit(f'\n::error::no /api/ingest at {site}. SITE_URL is probably not the VMAX site.')
-          elif good == 503:
-              sys.exit('\n::error::the app is up but its database binding is unavailable.')
           else:
               print(f'::warning::unexpected status {good}; continuing, but watch the index step.')
           PY
@@ -154,18 +157,30 @@ jobs:
           LLM_MODEL: ${{ vars.LLM_MODEL }}
           EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
           EMBEDDING_DIMENSIONS: ${{ vars.EMBEDDING_DIMENSIONS || '1536' }}
+          REASONING_EFFORT: ${{ vars.REASONING_EFFORT }}
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
           QDRANT_COLLECTION: ${{ vars.QDRANT_COLLECTION || 'polylogue' }}
           SITE_URL: ${{ secrets.SITE_URL }}
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
-        run: python pipeline/index_corpus.py data/hn.jsonl --max-documents "${{ inputs.max_documents }}"
+        run: |
+          if [ "${{ inputs.offline_upload }}" = "true" ]; then
+            python pipeline/index_corpus.py data/hn.jsonl \
+              --max-documents "${{ inputs.max_documents }}" \
+              --offline-output data/upload-to-admin-ingest.jsonl
+          else
+            python pipeline/index_corpus.py data/hn.jsonl \
+              --max-documents "${{ inputs.max_documents }}"
+          fi
 
-      # Private to repository collaborators. Review the labels the model assigned before scaling up.
-      - name: Upload this run's JSONL for review
+      # Private to repository collaborators. With offline delivery this artifact is not a review
+      # copy but the payload itself: the run is unfinished until it is uploaded at /admin/ingest.
+      - name: Upload artifact
         uses: actions/upload-artifact@v6
         with:
           name: corpus-${{ github.run_id }}
-          path: data/hn.jsonl
+          path: |
+            data/hn.jsonl
+            data/upload-to-admin-ingest.jsonl
           retention-days: 7
           if-no-files-found: warn

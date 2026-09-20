@@ -57,13 +57,14 @@ def annotate(p):
     return p
 
 def main():
-    ap=argparse.ArgumentParser();ap.add_argument('input');ap.add_argument('--state',default='data/index.sqlite');ap.add_argument('--max-documents',type=int,default=100);ap.add_argument('--dry-run',action='store_true');ap.add_argument('--reviewed',action='store_true',help='Use manually reviewed enrichment already in JSONL');a=ap.parse_args()
+    ap=argparse.ArgumentParser();ap.add_argument('input');ap.add_argument('--state',default='data/index.sqlite');ap.add_argument('--max-documents',type=int,default=100);ap.add_argument('--dry-run',action='store_true');ap.add_argument('--reviewed',action='store_true',help='Use manually reviewed enrichment already in JSONL');ap.add_argument('--offline-output',help='Write enriched posts to this JSONL instead of POSTing to SITE_URL, for hosts that refuse server-to-server calls. Upload the file through the site admin page to finish.');a=ap.parse_args()
     Path(a.state).parent.mkdir(parents=True,exist_ok=True);con=sqlite3.connect(a.state)
     con.execute('CREATE TABLE IF NOT EXISTS done(id TEXT PRIMARY KEY,hash TEXT UNIQUE,language TEXT)')
     con.execute('CREATE TABLE IF NOT EXISTS annotated_v2(hash TEXT PRIMARY KEY,payload TEXT NOT NULL)')
     qurl=os.getenv('QDRANT_URL','').rstrip('/');collection=os.getenv('QDRANT_COLLECTION','polylogue');qh={'api-key':os.getenv('QDRANT_API_KEY','')};processed=0;rejected=0;duplicate=0
     if not a.dry_run:
-        for key in (provider_key(),'QDRANT_URL','SITE_URL','INGEST_TOKEN'):
+        required=[provider_key(),'QDRANT_URL'] if a.offline_output else [provider_key(),'QDRANT_URL','SITE_URL','INGEST_TOKEN']
+        for key in required:
             if not os.getenv(key):raise SystemExit(f'{key} is required')
         # Collection creation is explicit and refuses incompatible existing dimensions.
         dimensions=embed_dimensions()
@@ -104,8 +105,18 @@ def main():
                 raise SystemExit(f'embedding provider returned a vector that is not {dimensions}-dimensional; check EMBEDDING_MODEL and EMBEDDING_DIMENSIONS')
             embedding=[sum(v['embedding'][i] for v in vectors)/len(vectors) for i in range(dimensions)]
             # D1 is authoritative. Deleted or failed D1 rows cannot be exposed by vector search.
-            request(os.environ['SITE_URL'].rstrip('/')+'/api/ingest',{'posts':[p]},{'Authorization':'Bearer '+os.environ['INGEST_TOKEN']})
+            # Offline delivery inverts that for a while: the vector lands here and the row only
+            # when the operator uploads the file. Search joins Qdrant ids back to D1 and drops
+            # ids with no row, so the gap shows up as missing results, never as wrong ones.
+            if a.offline_output:
+                with open(a.offline_output,'a',encoding='utf-8') as out:out.write(json.dumps(p,ensure_ascii=False)+'\n')
+            else:
+                request(os.environ['SITE_URL'].rstrip('/')+'/api/ingest',{'posts':[p]},{'Authorization':'Bearer '+os.environ['INGEST_TOKEN']})
             request(qurl+'/collections/'+collection+'/points?wait=true',{'points':[{'id':p['id'],'vector':embedding,'payload':{k:p[k] for k in ('language','source','publishedAt')}}]},qh,'PUT')
             con.execute('INSERT INTO done(id,hash,language) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET hash=excluded.hash,language=excluded.language',(p['id'],p['contentHash'],p['language']));con.commit();processed+=1
-    counts=dict(con.execute('SELECT language,COUNT(*) FROM done GROUP BY language').fetchall());print(json.dumps({'processed':processed,'rejected':rejected,'duplicates':duplicate,'dry_run':a.dry_run,'indexed_total':sum(counts.values()),'language_counts':counts},ensure_ascii=False,indent=2))
+    counts=dict(con.execute('SELECT language,COUNT(*) FROM done GROUP BY language').fetchall())
+    summary={'processed':processed,'rejected':rejected,'duplicates':duplicate,'dry_run':a.dry_run,'indexed_total':sum(counts.values()),'language_counts':counts}
+    if a.offline_output and not a.dry_run:summary['awaiting_upload']=a.offline_output
+    print(json.dumps(summary,ensure_ascii=False,indent=2))
+    if a.offline_output and processed and not a.dry_run:print(f'\nNOT FINISHED: {processed} documents are vectors in Qdrant only. Upload {a.offline_output} at /admin/ingest to write them to the database.')
 if __name__=='__main__':main()
