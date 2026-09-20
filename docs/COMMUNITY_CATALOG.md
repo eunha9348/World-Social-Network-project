@@ -1,20 +1,24 @@
 # VMAX 세계 커뮤니티 후보 목록
 
-총 97개. **연동 완료 목록도, 인기 순위도 아닙니다.** 조사 및 연결 후보 목록입니다.
+총 99개. **연동 완료 목록도, 인기 순위도 아닙니다.** 조사 및 연결 후보 목록입니다.
 국가나 작성자의 국적을 추정하지 않습니다. 지역은 주요 이용권역이며 독점적 분류가 아닙니다.
 
 상태는 "오늘 VMAX가 이 출처를 읽을 수 있는가"에 대한 답입니다.
 
 | 상태 | 뜻 | 개수 |
 |---|---|---:|
-| **수집 중** | 수집기가 구현되어 실제로 동작합니다 | 2 |
-| 공개 API 확인 · 연동 예정 | 공개 API로 공개 게시물을 읽을 수 있으나 커넥터가 아직 없습니다 | 7 |
+| **수집 중** | 수집기가 있고 실제 도달을 확인했습니다 | 6 |
+| 공개 API 확인 · 연동 예정 | 공개 API로 공개 게시물을 읽을 수 있으나 커넥터가 아직 없습니다 | 5 |
 | 추후 오픈 예정 · 이용 권한 협의 필요 | 공개 API가 없거나 운영자의 수집 허가가 필요합니다 | 88 |
 
 **'추후 오픈 예정'은 로드맵 약속이 아니며, 약관이 금지하는 사이트를 크롤링할 근거가 되지 않습니다.**
 네이버 카페·다음 카페·디시인사이드·클리앙·에펨코리아·더쿠 등 국내 커뮤니티는 공개 API가 없고
 대량 수집이 약관에 위배되므로, 정식 이용 권한이나 데이터 제공 계약을 확보하기 전까지 수집하지 않습니다.
 Instagram·Facebook·LinkedIn·X도 같은 이유로 제외되어 있습니다.
+
+**수집 중** 6개는 개별 사이트가 아니라 제품군입니다. Mastodon·Lemmy·Discourse는 인스턴스마다,
+Stack Exchange는 사이트마다 하나씩 늘어납니다. 2026-09-20 기준 실제 도달을 확인한 호스트
+54개는 `docs/VERIFIED_SOURCES.md`에 있으며, 한국어는 Mastodon 인스턴스로 확보합니다.
 
 | 커뮤니티 | 권역 | 분류 | 상태 |
 |---|---|---|---|
@@ -28,11 +32,13 @@ Instagram·Facebook·LinkedIn·X도 같은 이유로 제외되어 있습니다.
 | [Threads](https://www.threads.com) | 글로벌 | 소셜 | 추후 오픈 예정 · 이용 권한 협의 필요 |
 | [Bluesky](https://bsky.app) | 글로벌 | 소셜 | 공개 API 확인 · 연동 예정 |
 | [Mastodon](https://joinmastodon.org) | 글로벌 | 소셜 | **수집 중** |
+| [Lemmy](https://join-lemmy.org) | 글로벌 | 종합 | **수집 중** |
+| [Discourse](https://www.discourse.org) | 글로벌 | 종합 | **수집 중** |
 | [Discord](https://discord.com) | 글로벌 | 그룹 | 추후 오픈 예정 · 이용 권한 협의 필요 |
 | [Telegram](https://telegram.org) | 글로벌 | 그룹 | 추후 오픈 예정 · 이용 권한 협의 필요 |
 | [Quora](https://www.quora.com) | 글로벌 | 질문답변 | 추후 오픈 예정 · 이용 권한 협의 필요 |
-| [Stack Exchange](https://stackexchange.com) | 글로벌 | 질문답변 | 공개 API 확인 · 연동 예정 |
-| [Stack Overflow](https://stackoverflow.com) | 글로벌 | 개발 | 공개 API 확인 · 연동 예정 |
+| [Stack Exchange](https://stackexchange.com) | 글로벌 | 질문답변 | **수집 중** |
+| [Stack Overflow](https://stackoverflow.com) | 글로벌 | 개발 | **수집 중** |
 | [GitHub Discussions](https://github.com) | 글로벌 | 개발 | 공개 API 확인 · 연동 예정 |
 | [DEV Community](https://dev.to) | 글로벌 | 개발 | 공개 API 확인 · 연동 예정 |
 | [Hacker News](https://news.ycombinator.com) | 북미 | 기술 | **수집 중** |

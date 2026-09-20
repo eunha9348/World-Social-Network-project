@@ -42,11 +42,17 @@ def main():
             page=int(cursors.get(instance,1))
             for _ in range(a.pages):
                 if written>=a.limit:break
-                url=f'https://{instance}/api/v3/comment/list?'+urllib.parse.urlencode(
-                    {'type_':'All','sort':'New','limit':50,'page':page})
-                try:data=get_json(url)
-                except Unreachable as e:
-                    unreachable.append({'instance':instance,'reason':str(e)});break
+                # Lemmy 1.x moved the API to /api/v4; try both rather than call the host dead.
+                data=None
+                for version in ('v3','v4'):
+                    url=f'https://{instance}/api/{version}/comment/list?'+urllib.parse.urlencode(
+                        {'type_':'All','sort':'New','limit':50,'page':page})
+                    try:
+                        data=get_json(url)
+                        if isinstance((data or {}).get('comments'),list):break
+                    except Unreachable as e:reason=str(e);data=None
+                if data is None:
+                    unreachable.append({'instance':instance,'reason':reason});break
                 entries=(data or {}).get('comments') or []
                 if not entries:break
                 observed_at=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')

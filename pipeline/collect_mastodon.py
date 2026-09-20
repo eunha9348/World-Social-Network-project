@@ -80,10 +80,13 @@ def main():
                 if written>=a.limit:break
                 query={'limit':40}
                 if max_id:query['max_id']=max_id
-                url=f'https://{instance}/api/v1/timelines/public?'+urllib.parse.urlencode(query)
-                try:statuses=get(url)
-                except Exception as e:
-                    unreachable.append({'instance':instance,'reason':type(e).__name__});break
+                statuses=None
+                for scope in ({},{'local':'true'}):
+                    url=f'https://{instance}/api/v1/timelines/public?'+urllib.parse.urlencode({**query,**scope})
+                    try:statuses=get(url);break
+                    except Exception as e:reason=type(e).__name__
+                if statuses is None:
+                    unreachable.append({'instance':instance,'reason':reason});break
                 if not isinstance(statuses,list) or not statuses:break
                 max_id=str(statuses[-1].get('id'))
                 observed_at=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')

@@ -26,7 +26,12 @@ CANDIDATES={
 
 def probe_mastodon(host):
     info=get_json(f'https://{host}/api/v1/instance')
-    sample=get_json(f'https://{host}/api/v1/timelines/public?limit=5')
+    # Some builds reject an unscoped public timeline with 422; local=true is accepted.
+    sample=None
+    for scope in ('','&local=true'):
+        try:sample=get_json(f'https://{host}/api/v1/timelines/public?limit=5{scope}');break
+        except Unreachable as e:last=e
+    if sample is None:raise last
     if not isinstance(sample,list):raise Unreachable('public timeline not a list')
     languages=sorted({(s.get('language') or '?') for s in sample if isinstance(s,dict)})
     usable_count=sum(1 for s in sample if isinstance(s,dict) and not s.get('reblog')
@@ -36,8 +41,14 @@ def probe_mastodon(host):
             'declared_languages':(info or {}).get('languages') or []}
 
 def probe_lemmy(host):
-    data=get_json(f'https://{host}/api/v3/comment/list?'+urllib.parse.urlencode(
-        {'type_':'All','sort':'New','limit':5}))
+    data=None
+    for version in ('v3','v4'):
+        try:
+            data=get_json(f'https://{host}/api/{version}/comment/list?'+urllib.parse.urlencode(
+                {'type_':'All','sort':'New','limit':5}))
+            if isinstance((data or {}).get('comments'),list):break
+        except Unreachable as e:last=e;data=None
+    if data is None:raise last
     entries=(data or {}).get('comments')
     if not isinstance(entries,list):raise Unreachable('no comments array (API version mismatch?)')
     usable_count=sum(1 for e in entries if usable(clean_html((e.get('comment') or {}).get('content'))))
