@@ -134,6 +134,27 @@ Actions 탭 → **Provider check** → Run workflow.
 
 비용: 임베딩 호출 1회. 사실상 0원이다.
 
+### 3-2-1. 배포 접근 설정을 public으로 (실측 확인됨)
+
+2026-09-20 실측: 배포가 로그인 전용이면 **모든 서버 간 호출이 앱에 닿기 전에 403으로 막힌다.**
+
+```
+GET  /api/status  (인증 불필요)  -> 403
+POST /api/ingest  (올바른 토큰)  -> 403
+POST /api/ingest  (틀린 토큰)    -> 403
+```
+
+인증이 필요 없는 `/api/status`까지 403이라는 점이 결정적이다. 앱은 이 조합을 만들 수 없다.
+`admin()`은 틀린 토큰에 **401**을 반환하고, 앱의 유일한 403인 `sameOrigin()`은 수집기가
+보내지 않는 Origin 헤더를 요구한다. 즉 요청이 라우트에 도달하지 못했다.
+
+수집기는 브라우저 세션이 없으므로 배포 접근 설정이 public이어야 색인이 가능하다.
+`ADMIN_MANUAL.md` 9장이 말하는 그 설정이다. 공개되는 것은 **읽기뿐**이며
+`/api/ingest`는 계속 `INGEST_TOKEN`을, 보고서·토론은 계속 로그인을 요구한다.
+
+public으로 바꾼 뒤 403이 **401**로 바뀌면 게이트는 열렸고 이제 사이트 환경변수에
+`INGEST_TOKEN`이 없다는 뜻이다. 두 단계를 따로 통과해야 한다.
+
 ### 3-3. Ingest corpus
 
 Actions 탭 → **Ingest corpus** → Run workflow. 입력 3개:
