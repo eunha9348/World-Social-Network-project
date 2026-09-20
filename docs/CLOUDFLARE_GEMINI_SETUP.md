@@ -194,8 +194,9 @@ Gemini는 모델이 다르므로 `annotate()`의 JSON 출력 품질을 **처음�
 코드 검증은 이미 통과했다 (ESLint 0건 · `tsc --noEmit` · Python 5개 · 프로덕션 빌드).
 **아래는 실제 키를 연결한 뒤에만 확인 가능한 항목이다.**
 
-- [ ] `/models` 목록에 `LLM_MODEL`·`EMBEDDING_MODEL` ID가 존재한다
-- [ ] 임베딩 응답 길이가 정확히 `EMBEDDING_DIMENSIONS`다 (3장 curl)
+- [x] `/models` 목록에 `LLM_MODEL`·`EMBEDDING_MODEL` ID가 존재한다 (2026-09-20 확인, 58개)
+- [x] 임베딩 응답 길이가 정확히 `EMBEDDING_DIMENSIONS`다 — `gemini-embedding-001`이 1536 반환
+- [x] `gemini-3.5-flash`가 `response_format: json_object`를 지키고 language/sentiment/stance/confidence를 모두 반환한다
 - [ ] `--dry-run`이 0건 reject로 통과한다
 - [ ] 20건 색인 후 Qdrant 컬렉션 `points_count`가 20이다
 - [ ] 검색이 `mode: "hybrid-rrf"`를 반환한다 (`lexical`이면 벡터 경로가 죽은 것)
@@ -214,6 +215,28 @@ Gemini는 모델이 다르므로 `annotate()`의 JSON 출력 품질을 **처음�
 Gemini 전환으로 `OWNER_REPORT.md` 4~6장의 단가표가 **더 이상 맞지 않는다.**
 Gemini와 OpenAI는 과금 단위가 달라 단순 치환이 안 되고, 특히 `gemini-embedding-001`은
 `text-embedding-3-small`($0.02/1M)보다 비싸다. 색인 건수가 늘수록 이 차이가 커진다.
+
+### 측정된 사실: 추론 토큰은 usage에 안 보인다
+
+2026-09-20 Provider check 실측값이다. `annotate()`와 동일한 호출 1회:
+
+```
+usage = {"completion_tokens": 39, "prompt_tokens": 103, "total_tokens": 754}
+```
+
+39 + 103 = 142인데 **total은 754다. 612토큰이 두 필드 어디에도 없다.**
+이것이 모델이 답하기 전에 소모한 추론 토큰이며, **과금 대상이다.**
+
+즉 눈에 보이는 입출력만으로 비용을 추정하면 **실제의 1/5 수준으로 과소평가한다.**
+`OWNER_REPORT.md` 6장의 월 $43 시나리오는 비추론 모델을 가정한 값이므로
+`gemini-3.5-flash` 기준으로는 그대로 쓸 수 없다.
+
+대응:
+- 비용을 추정할 때는 `completion_tokens`가 아니라 **`total_tokens`를 쓴다.**
+- `REASONING_EFFORT`를 `none` 또는 `minimal`로 낮추고 같은 프로브를 다시 돌려
+  `total_tokens` 감소폭을 측정한다. 분류·재순위화는 깊은 추론이 필요한 작업이 아니다.
+- 낮춘 뒤 **판별 품질이 유지되는지 20건 색인으로 확인**한다. 토큰만 보고 정하지 않는다.
+- AI Gateway 로그로 작업 유형별 실제 `total_tokens`를 모은 뒤 외삽한다.
 
 **추정하지 말고 측정한다.** AI Gateway 로그로 20건 → 100건 색인의 실제 토큰을 찍고,
 거기서 1,000건·10,000건을 외삽한다. 공식 단가는
