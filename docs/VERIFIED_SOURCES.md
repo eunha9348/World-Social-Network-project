@@ -35,8 +35,7 @@ meta.discourse.org,discuss.python.org,forum.djangoproject.com,users.rust-lang.or
 
 | 언어 | 확인된 호스트 |
 |---|---|
-| 한국어 `ko` | **planet.moe**(플래닛, 인스턴스 선언 ko), **twingyeo.kr** — 표본에 실제 `ko` 게시물 확인 |
-| 한국어 `ko` (선언만) | qdon.space(큐돈), uri.life(우리.인생) — 인스턴스는 ko로 선언, 5건 표본에는 미출현 |
+| 한국어 `ko` | **planet.moe, twingyeo.kr, qdon.space, uri.life** — 아래 실측 참고 |
 | 일본어 `ja` | mstdn.jp, pawoo.net, planet.moe, qdon.space, uri.life, ja.stackoverflow |
 | 독일어 `de` | troet.cafe, ruhr.social, discuss.tchncs.de, mastodon.world, mas.to |
 | 프랑스어 `fr` | piaille.fr, jlai.lu |
@@ -47,8 +46,22 @@ meta.discourse.org,discuss.python.org,forum.djangoproject.com,users.rust-lang.or
 | 중국어 `zh-TW` | mstdn.jp, uri.life (표본에 출현) |
 | 아랍어 `ar` | mastodon.uno (표본에 출현) |
 
-한국어 표본 수가 적다. 실제 수집 후 `language_counts`로 다시 확인하고,
-부족하면 한국어 인스턴스를 더 찾아 `hosts`에 추가한다.
+### 한국어 실측 (2026-09-20)
+
+네 인스턴스를 `languages=ko`로 실제 수집한 결과다.
+
+```
+hosts: planet.moe,twingyeo.kr,qdon.space,uri.life
+{"collected": 50, "skipped": 338, "per_language": {"ko": 50}, "unreachable": []}
+```
+
+- 요청한 50건을 **전부 한국어로 채웠다.** 상한에 걸려 멈춘 것이므로 가용량은 더 크다.
+- `unreachable`이 비어 있다. 프로브의 5건 표본에서 `ko`가 안 보였던 qdon.space와 uri.life도
+  실제로는 한국어를 낸다. **표본이 조용했던 것이지 한국어가 없던 것이 아니다.**
+- 388건을 훑어 50건을 남겼으므로 한국어 비율은 약 13%다. 수집 단계 필터라 모델 비용은 들지 않는다.
+- 색인 dry-run에서 20건 처리·거부 0건. 한국어 본문이 `normalize()`를 통과한다.
+
+한국어는 이 경로로 확보 가능하다는 것이 확인되었다.
 
 ## 도달 실패 6개
 
