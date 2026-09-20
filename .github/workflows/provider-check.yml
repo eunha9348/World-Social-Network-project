@@ -12,7 +12,7 @@ on:
         options: [gemini, openai]
         default: gemini
       chat_models:
-        description: 'MODEL IDS here, comma-separated to compare. e.g. gemini-3.8-flash,gemini-3.5-flash'
+        description: 'MODEL IDS here, comma-separated to compare. e.g. gemini-3.5-flash,gemini-3.1-flash-lite'
         type: string
         default: ''
       embedding_model:
@@ -54,7 +54,7 @@ jobs:
           python - <<'PY'
           import json, os, sys, urllib.request, urllib.error
           P = {'gemini': ('https://generativelanguage.googleapis.com/v1beta/openai',
-                          'GOOGLE_API_KEY', 'gemini-embedding-001', 'gemini-3.8-flash'),
+                          'GOOGLE_API_KEY', 'gemini-embedding-001', 'gemini-3.5-flash'),
                'openai': ('https://api.openai.com/v1',
                           'OPENAI_API_KEY', 'text-embedding-3-small', 'gpt-4.1-mini')}
           name = os.environ['PROVIDER']

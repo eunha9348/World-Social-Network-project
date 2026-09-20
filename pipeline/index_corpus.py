@@ -13,7 +13,7 @@ def request(url,body=None,headers=None,method=None):
             if e.code not in (429,500,502,503,504) or attempt==4:raise RuntimeError(f'HTTP {e.code}: request failed; secrets omitted') from None
             time.sleep(min(30,2**attempt))
 PROVIDERS={'openai':{'base':'https://api.openai.com/v1','key':'OPENAI_API_KEY','chat':'gpt-4.1-mini','embed':'text-embedding-3-small'},
-           'gemini':{'base':'https://generativelanguage.googleapis.com/v1beta/openai','key':'GOOGLE_API_KEY','chat':'gemini-3.8-flash','embed':'gemini-embedding-001'}}
+           'gemini':{'base':'https://generativelanguage.googleapis.com/v1beta/openai','key':'GOOGLE_API_KEY','chat':'gemini-3.5-flash','embed':'gemini-embedding-001'}}
 def provider_name():
     explicit=os.getenv('AI_PROVIDER','').lower()
     if explicit in PROVIDERS:return explicit

@@ -12,7 +12,7 @@ export function wrap(fn:(r:Request)=>Promise<Response>){return async(r:Request)=
 export async function json(r:Request){const raw=await r.text();if(raw.length>300000)throw new ApiError(413,'요청이 너무 큽니다.');try{return JSON.parse(raw)}catch{throw new ApiError(400,'올바른 JSON을 입력해 주세요.')}}
 // Gemini exposes an OpenAI-compatible surface for chat/completions and embeddings, so one base URL
 // swap covers both providers. It does NOT expose /moderations; see classify() below.
-const PROVIDERS={openai:{base:'https://api.openai.com/v1',key:'OPENAI_API_KEY',chat:'gpt-4.1-mini',embed:'text-embedding-3-small'},gemini:{base:'https://generativelanguage.googleapis.com/v1beta/openai',key:'GOOGLE_API_KEY',chat:'gemini-3.8-flash',embed:'gemini-embedding-001'}} as const;
+const PROVIDERS={openai:{base:'https://api.openai.com/v1',key:'OPENAI_API_KEY',chat:'gpt-4.1-mini',embed:'text-embedding-3-small'},gemini:{base:'https://generativelanguage.googleapis.com/v1beta/openai',key:'GOOGLE_API_KEY',chat:'gemini-3.5-flash',embed:'gemini-embedding-001'}} as const;
 type Provider=keyof typeof PROVIDERS;
 export function aiProvider():Provider{const explicit=config('AI_PROVIDER').toLowerCase();if(explicit==='openai'||explicit==='gemini')return explicit;return config('GOOGLE_API_KEY')?'gemini':'openai'}
 export function aiKey(target:Provider=aiProvider()){return config(PROVIDERS[target].key)}
