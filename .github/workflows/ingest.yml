@@ -6,6 +6,23 @@ name: Ingest corpus
 on:
   workflow_dispatch:
     inputs:
+      source:
+        description: 'hn-search is topical. hn-firehose returns whatever was posted, on no subject.'
+        type: choice
+        options: [hn-search, mastodon, hn-firehose]
+        default: hn-search
+      query:
+        description: 'Subject, for hn-search. The corpus is only as focused as this.'
+        type: string
+        default: 'artificial intelligence'
+      instances:
+        description: 'Mastodon hosts, comma-separated. Pick by language community.'
+        type: string
+        default: 'mastodon.social'
+      languages:
+        description: 'Keep only these languages, for mastodon. Blank keeps all.'
+        type: string
+        default: ''
       collect_limit:
         description: 'Hacker News items to collect this run'
         type: string
@@ -45,24 +62,39 @@ jobs:
         with:
           path: |
             data/hn.cursor
+            data/hn-search.cursor
+            data/mastodon.cursor
             data/index.sqlite
           key: vmax-ingest-${{ github.run_id }}
           restore-keys: vmax-ingest-
 
       # A dry run must not advance the real cursor: the items it collects are never indexed, so
       # sharing the cursor would walk them past the real run and lose them.
-      - name: Collect from the official Hacker News API
+      - name: Collect
+        env:
+          SOURCE: ${{ inputs.source }}
+          QUERY: ${{ inputs.query }}
+          INSTANCES: ${{ inputs.instances }}
+          LANGUAGES: ${{ inputs.languages }}
+          LIMIT: ${{ inputs.collect_limit }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}" \
-              --output data/hn.jsonl --cursor data/hn.dryrun.cursor
-          else
-            python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}" \
-              --output data/hn.jsonl --cursor data/hn.cursor
-          fi
+          if [ "${{ inputs.dry_run }}" = "true" ]; then SUFFIX=".dryrun"; else SUFFIX=""; fi
+          case "$SOURCE" in
+            hn-search)
+              python pipeline/collect_hn.py --query "$QUERY" --limit "$LIMIT" \
+                --output data/corpus.jsonl --cursor "data/hn-search$SUFFIX.cursor" ;;
+            hn-firehose)
+              python pipeline/collect_hn.py --limit "$LIMIT" \
+                --output data/corpus.jsonl --cursor "data/hn$SUFFIX.cursor" ;;
+            mastodon)
+              python pipeline/collect_mastodon.py --instances "$INSTANCES" --languages "$LANGUAGES" \
+                --limit "$LIMIT" --output data/corpus.jsonl --cursor "data/mastodon$SUFFIX.cursor" ;;
+            *) echo "::error::unknown source $SOURCE"; exit 1 ;;
+          esac
+          echo "collected $(wc -l < data/corpus.jsonl) lines total in data/corpus.jsonl"
 
       - name: Validate structure
-        run: python pipeline/index_corpus.py data/hn.jsonl --dry-run --max-documents "${{ inputs.max_documents }}"
+        run: python pipeline/index_corpus.py data/corpus.jsonl --dry-run --max-documents "${{ inputs.max_documents }}"
 
       # These values are easy to confuse. Catch a swap here rather than after paying for
       # annotation and embeddings. Offline delivery never contacts the site, so it needs neither
@@ -165,11 +197,11 @@ jobs:
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
         run: |
           if [ "${{ inputs.offline_upload }}" = "true" ]; then
-            python pipeline/index_corpus.py data/hn.jsonl \
+            python pipeline/index_corpus.py data/corpus.jsonl \
               --max-documents "${{ inputs.max_documents }}" \
               --offline-output data/upload-to-admin-ingest.jsonl
           else
-            python pipeline/index_corpus.py data/hn.jsonl \
+            python pipeline/index_corpus.py data/corpus.jsonl \
               --max-documents "${{ inputs.max_documents }}"
           fi
 
@@ -180,7 +212,7 @@ jobs:
         with:
           name: corpus-${{ github.run_id }}
           path: |
-            data/hn.jsonl
+            data/corpus.jsonl
             data/upload-to-admin-ingest.jsonl
           retention-days: 7
           if-no-files-found: warn
