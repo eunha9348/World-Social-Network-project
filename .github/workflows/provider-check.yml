@@ -12,7 +12,7 @@ on:
         options: [gemini, openai]
         default: gemini
       chat_models:
-        description: 'Comma-separated to compare candidates. Blank uses the provider default.'
+        description: 'MODEL IDS here, comma-separated to compare. e.g. gemini-3.8-flash,gemini-3.5-flash'
         type: string
         default: ''
       embedding_model:
@@ -28,7 +28,7 @@ on:
         type: string
         default: '2000'
       reasoning_effort:
-        description: 'Blank sends none. Try none/low/medium/high on a thinking model.'
+        description: 'NOT a model id. One of none/minimal/low/medium/high, or blank.'
         type: string
         default: ''
 
@@ -67,6 +67,13 @@ jobs:
           dims = int(os.environ.get('DIMENSIONS') or 1536)
           max_tokens = int(os.environ.get('MAX_TOKENS') or 2000)
           effort = (os.environ.get('REASONING_EFFORT') or '').strip()
+          VALID_EFFORT = {'none', 'minimal', 'low', 'medium', 'high'}
+          if effort and effort.lower() not in VALID_EFFORT:
+              hint = ('  That looks like a model id. Model ids go in the chat_models input; '
+                      'reasoning_effort takes only an effort level.'
+                      if ',' in effort or 'gemini' in effort.lower() or 'gpt' in effort.lower() else '')
+              sys.exit(f'::error::reasoning_effort={effort!r} is not valid. '
+                       f'Use one of {sorted(VALID_EFFORT)}, or leave it blank.{hint}')
 
           # The key travels in a request header and is never echoed in a provider error body, but
           # scrub it anyway so the body can be shown. Hiding it entirely left failures undiagnosable.
@@ -195,8 +202,9 @@ jobs:
               print(f'set LLM_MODEL to one of these (pin a version, not a -latest alias)')
           if failures:
               print(f'FAILED: {", ".join(failures)}')
-              print('402 on chat AND embeddings points at account billing or credits.')
-              print('402/404 on embeddings only points at that model id or its tier.')
+              print('400 -> the request itself was rejected; the message above names the field.')
+              print('402 on chat AND embeddings -> account billing or credits.')
+              print('402/404 on embeddings only -> that model id or its tier.')
               sys.exit(1)
           print('ALL CHECKS PASSED')
           PY
