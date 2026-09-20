@@ -4,6 +4,10 @@
 name: Ingest corpus
 
 on:
+  # A scheduled run spends model credits without anyone watching, so it does nothing until the
+  # repository variable SCHEDULE_ENABLED is set to true. The workflow existing is not consent.
+  schedule:
+    - cron: '0 3 * * *'
   workflow_dispatch:
     inputs:
       source:
@@ -48,7 +52,19 @@ concurrency:
 jobs:
   ingest:
     runs-on: ubuntu-latest
+    env:
+      # inputs.* are empty on a schedule, so resolve every switch once here.
+      SCHEDULED: ${{ github.event_name == 'schedule' }}
+      DRY_RUN: ${{ github.event_name == 'schedule' && 'false' || inputs.dry_run }}
+      OFFLINE: ${{ github.event_name == 'schedule' && 'true' || inputs.offline_upload }}
+      MAX_DOCUMENTS: ${{ github.event_name == 'schedule' && (vars.SCHEDULE_MAX_DOCUMENTS || '40') || inputs.max_documents }}
     steps:
+      - name: Gate scheduled runs
+        if: ${{ github.event_name == 'schedule' && vars.SCHEDULE_ENABLED != 'true' }}
+        run: |
+          echo "::notice::Scheduled ingestion is off. Set the repository variable SCHEDULE_ENABLED to true to turn it on."
+          exit 1
+
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
         with:
@@ -67,6 +83,10 @@ jobs:
             data/lemmy.cursor
             data/stackexchange.cursor
             data/discourse.cursor
+            data/mastodon-*.cursor
+            data/lemmy-*.cursor
+            data/stackexchange-*.cursor
+            data/discourse-*.cursor
             data/index.sqlite
           key: vmax-ingest-${{ github.run_id }}
           restore-keys: vmax-ingest-
@@ -76,12 +96,21 @@ jobs:
       - name: Collect
         env:
           SOURCE: ${{ inputs.source }}
+          PER_GROUP: ${{ vars.SCHEDULE_PER_GROUP || '8' }}
           QUERY: ${{ inputs.query }}
           HOSTS: ${{ inputs.hosts }}
           LANGUAGES: ${{ inputs.languages }}
           LIMIT: ${{ inputs.collect_limit }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then SUFFIX=".dryrun"; else SUFFIX=""; fi
+          if [ "$DRY_RUN" = "true" ]; then SUFFIX=".dryrun"; else SUFFIX=""; fi
+          if [ "$SCHEDULED" = "true" ]; then
+            # Every group gets its own budget; one shared pool refills with whichever source is
+            # fastest and the corpus drifts back to one language.
+            python pipeline/collect_all.py --per-group "$PER_GROUP" \
+              --output data/corpus.jsonl --cursor-dir data
+            echo "collected $(wc -l < data/corpus.jsonl) lines total in data/corpus.jsonl"
+            exit 0
+          fi
           case "$SOURCE" in
             hn-search)
               python pipeline/collect_hn.py --query "$QUERY" --limit "$LIMIT" \
@@ -106,15 +135,16 @@ jobs:
           echo "collected $(wc -l < data/corpus.jsonl) lines total in data/corpus.jsonl"
 
       - name: Validate structure
-        run: python pipeline/index_corpus.py data/corpus.jsonl --dry-run --max-documents "${{ inputs.max_documents }}"
+        run: python pipeline/index_corpus.py data/corpus.jsonl --dry-run --max-documents "$MAX_DOCUMENTS"
+        env:
+          MAX_DOCUMENTS: ${{ env.MAX_DOCUMENTS }}
 
       # These values are easy to confuse. Catch a swap here rather than after paying for
       # annotation and embeddings. Offline delivery never contacts the site, so it needs neither
       # SITE_URL nor INGEST_TOKEN and the endpoint probe is skipped.
       - name: Preflight secrets
-        if: ${{ inputs.dry_run == false }}
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run == false }}
         env:
-          OFFLINE: ${{ inputs.offline_upload }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           QDRANT_URL: ${{ secrets.QDRANT_URL }}
           QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
@@ -193,7 +223,7 @@ jobs:
           PY
 
       - name: Index
-        if: ${{ inputs.dry_run == false }}
+        if: ${{ github.event_name == 'schedule' || inputs.dry_run == false }}
         env:
           AI_PROVIDER: ${{ vars.AI_PROVIDER || 'gemini' }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
@@ -208,13 +238,13 @@ jobs:
           SITE_URL: ${{ secrets.SITE_URL }}
           INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
         run: |
-          if [ "${{ inputs.offline_upload }}" = "true" ]; then
+          if [ "$OFFLINE" = "true" ]; then
             python pipeline/index_corpus.py data/corpus.jsonl \
-              --max-documents "${{ inputs.max_documents }}" \
+              --max-documents "$MAX_DOCUMENTS" \
               --offline-output data/upload-to-admin-ingest.jsonl
           else
             python pipeline/index_corpus.py data/corpus.jsonl \
-              --max-documents "${{ inputs.max_documents }}"
+              --max-documents "$MAX_DOCUMENTS"
           fi
 
       # Private to repository collaborators. With offline delivery this artifact is not a review

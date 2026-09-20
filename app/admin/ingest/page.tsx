@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import {useState} from 'react';
+import {useCallback,useEffect,useState} from 'react';
 
 // ChatGPT Sites refuses server-to-server calls, so the collector cannot POST to /api/ingest itself.
 // admin() accepts either INGEST_TOKEN or a signed-in ADMIN_EMAILS user, and this page is the second
@@ -11,6 +11,8 @@ const BATCH=20;
 
 type Row=Record<string,unknown>;
 type Result={accepted?:number;error?:string};
+type Count={source?:string;language?:string;count:number};
+type Status={sources?:Count[];languageCounts?:Count[]};
 
 export default function AdminIngestPage(){
  const [rows,setRows]=useState<Row[]>([]);
@@ -20,7 +22,11 @@ export default function AdminIngestPage(){
  const [accepted,setAccepted]=useState(0);
  const [busy,setBusy]=useState(false);
  const [log,setLog]=useState<string[]>([]);
+ const [status,setStatus]=useState<Status|null>(null);
  const note=(line:string)=>setLog(previous=>[...previous,line]);
+ // What is already stored, so an upload is a decision rather than a guess.
+ const refresh=useCallback(()=>{fetch('/api/status').then(r=>r.ok?r.json():null).then(d=>setStatus(d as Status)).catch(()=>{})},[]);
+ useEffect(refresh,[refresh]);
 
  async function read(file:File){
   setRows([]);setSkipped(0);setDone(0);setAccepted(0);setLog([]);setName(file.name);
@@ -58,6 +64,7 @@ export default function AdminIngestPage(){
   }
   setBusy(false);
   note(`완료: ${written}건 저장됨`);
+  refresh();
  }
 
  const percent=rows.length?Math.round(done/rows.length*100):0;
@@ -66,6 +73,11 @@ export default function AdminIngestPage(){
   <div className="no-print"><Link className="btn" href="/">워크스페이스로</Link></div>
   <section className="panel panelbody margintop">
    <h2>원문 반입</h2>
+   {status&&<div className="margintop"><p className="meta">
+    현재 저장된 원문 {(status.sources||[]).reduce((n,s)=>n+(s.count||0),0).toLocaleString()}건
+    {(status.sources||[]).length?' · 출처 '+(status.sources||[]).map(s=>`${s.source} ${s.count}`).join(', '):''}
+    {(status.languageCounts||[]).length?' · 언어 '+(status.languageCounts||[]).map(l=>`${l.language} ${l.count}`).join(', '):''}
+   </p></div>}
    <p className="meta">
     수집 워크플로가 만든 JSONL을 올리면 데이터베이스에 저장합니다. 벡터는 수집 단계에서 이미
     저장되었으므로, 이 업로드를 마쳐야 검색 결과에 원문이 나타납니다.

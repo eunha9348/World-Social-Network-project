@@ -1,0 +1,15 @@
+{
+  "_comment": "Hosts confirmed reachable by probe_sources.py on 2026-09-20. Re-run the Probe sources workflow and update this file; instances close, move and disappear.",
+  "verified_at": "2026-09-20",
+  "plan": [
+    {"type": "mastodon", "hosts": "planet.moe,twingyeo.kr,qdon.space,uri.life", "languages": "ko", "note": "Korean"},
+    {"type": "mastodon", "hosts": "mstdn.jp,pawoo.net", "languages": "ja", "note": "Japanese"},
+    {"type": "mastodon", "hosts": "troet.cafe,ruhr.social,piaille.fr,mastodon.uno", "languages": "de,fr,it", "note": "European"},
+    {"type": "mastodon", "hosts": "mastodon.world,mas.to,fosstodon.org,mastodon.gamedev.place,social.vivaldi.net", "languages": "", "note": "General"},
+    {"type": "lemmy", "hosts": "lemmy.world,sh.itjust.works,programming.dev,lemmy.zip,lemmy.ca,lemmy.ml", "languages": "", "note": "English discussion"},
+    {"type": "lemmy", "hosts": "feddit.it,jlai.lu,discuss.tchncs.de", "languages": "", "note": "Italian, French, German"},
+    {"type": "stackexchange", "hosts": "ja.stackoverflow,ru.stackoverflow,es.stackoverflow,pt.stackoverflow", "languages": "", "note": "Non-English sites"},
+    {"type": "stackexchange", "hosts": "workplace,ux,politics,philosophy,skeptics,money,travel,cooking", "languages": "", "note": "Opinion-heavy sites"},
+    {"type": "discourse", "hosts": "discuss.python.org,users.rust-lang.org,forum.obsidian.md,discourse.mozilla.org,forums.swift.org,discuss.pytorch.org", "languages": "", "note": "Project forums"}
+  ]
+}
