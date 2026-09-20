@@ -45,8 +45,15 @@ jobs:
           key: vmax-ingest-${{ github.run_id }}
           restore-keys: vmax-ingest-
 
+      # A dry run must not advance the real cursor: the items it collects are never indexed, so
+      # sharing the cursor would walk them past the real run and lose them.
       - name: Collect from the official Hacker News API
-        run: python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}" --output data/hn.jsonl
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}"               --output data/hn.jsonl --cursor data/hn.dryrun.cursor
+          else
+            python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}"               --output data/hn.jsonl --cursor data/hn.cursor
+          fi
 
       - name: Validate structure
         run: python pipeline/index_corpus.py data/hn.jsonl --dry-run --max-documents "${{ inputs.max_documents }}"
