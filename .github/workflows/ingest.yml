@@ -97,37 +97,52 @@ jobs:
               sys.exit(1)
           print('secrets look consistent')
 
-          # Free reachability probe. /api/ingest authenticates before it validates the body, so an
-          # empty posts array separates "token accepted" from "token rejected" without indexing
-          # anything. Without this, a token missing on the site is only discovered after paying to
-          # annotate and embed the first document.
+          # Free reachability probe. The app returns 401 for a bad INGEST_TOKEN (admin() falls
+          # through to user()) and 400 for an accepted token with an empty body. Its only 403 is
+          # sameOrigin(), which needs an Origin header we do not send. So a 403 here means the
+          # request never reached the app and something in front of the site rejected it.
           import json, urllib.request, urllib.error
-          url = site.rstrip('/') + '/api/ingest'
-          req = urllib.request.Request(
-              url, data=json.dumps({'posts': []}).encode(),
-              headers={'Content-Type': 'application/json',
-                       'Authorization': 'Bearer ' + g('INGEST_TOKEN')})
-          try:
-              urllib.request.urlopen(req, timeout=30)
-              code = 200
-          except urllib.error.HTTPError as e:
-              code = e.code
-          except Exception as e:
-              sys.exit(f'::error::could not reach {url}: {type(e).__name__}. '
-                       f'Check SITE_URL points at your deployed VMAX site.')
-          print(f'POST {url} with an empty body -> HTTP {code}')
-          if code == 400:
-              print('token accepted (the empty body is what was rejected). Ready to index.')
-          elif code in (401, 403):
-              sys.exit('::error::the site rejected INGEST_TOKEN. Set the SAME value in the deployed '
-                       'site\'s environment variables and redeploy, then rerun.')
-          elif code == 404:
-              sys.exit(f'::error::no /api/ingest at {url}. SITE_URL is probably not the VMAX site.')
-          elif code == 503:
-              sys.exit('::error::the site reached its database binding but it is unavailable; '
-                       'check the deployment before indexing.')
+
+          def probe(path, token=None, method='GET'):
+              headers = {'Content-Type': 'application/json'}
+              if token is not None:
+                  headers['Authorization'] = 'Bearer ' + token
+              data = json.dumps({'posts': []}).encode() if method == 'POST' else None
+              req = urllib.request.Request(site.rstrip('/') + path, data=data,
+                                           headers=headers, method=method)
+              try:
+                  with urllib.request.urlopen(req, timeout=30) as r:
+                      return r.status
+              except urllib.error.HTTPError as e:
+                  return e.code
+              except Exception as e:
+                  sys.exit(f'::error::could not reach {site}{path}: {type(e).__name__}. '
+                           f'Check SITE_URL points at your deployed VMAX site.')
+
+          public = probe('/api/status')
+          good = probe('/api/ingest', g('INGEST_TOKEN'), 'POST')
+          bogus = probe('/api/ingest', 'definitely-not-the-token', 'POST')
+          print(f'GET  /api/status  (no auth)     -> {public}')
+          print(f'POST /api/ingest  (real token)  -> {good}')
+          print(f'POST /api/ingest  (wrong token) -> {bogus}')
+
+          if good == 400:
+              print('\ntoken accepted; only the empty body was rejected. Ready to index.')
+          elif good == bogus and good in (401, 403) and public in (401, 403):
+              sys.exit(f'\n::error::Every path returns {public}, including one needing no auth. The '
+                       f'request is being refused before it reaches the app, so this is the site\'s '
+                       f'access setting, not INGEST_TOKEN. Set the deployment to public, then rerun. '
+                       f'Reads being public is expected: /api/ingest still requires INGEST_TOKEN and '
+                       f'reports and debates still require sign-in.')
+          elif good in (401, 403) and bogus in (401, 403) and good != bogus:
+              sys.exit('\n::error::the app saw the request and rejected this INGEST_TOKEN. Set the '
+                       'SAME value in the deployed site\'s environment variables and redeploy.')
+          elif good == 404:
+              sys.exit(f'\n::error::no /api/ingest at {site}. SITE_URL is probably not the VMAX site.')
+          elif good == 503:
+              sys.exit('\n::error::the app is up but its database binding is unavailable.')
           else:
-              print(f'::warning::unexpected status {code}; continuing, but watch the index step.')
+              print(f'::warning::unexpected status {good}; continuing, but watch the index step.')
           PY
 
       - name: Index
