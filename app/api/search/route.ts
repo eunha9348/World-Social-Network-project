@@ -1,12 +1,11 @@
 import {rankEvidence} from '@/lib/provenance';
 import {languages} from '@/lib/types';
 import {z} from 'zod';
-import {wrap,db,config,provider,ai,user,rate} from '@/lib/server';
+import {wrap,db,config,aiKey,embed,ai,user,rate} from '@/lib/server';
 import type {Post} from '@/lib/types';
 
 type QdrantCondition={key:string;range?:{gte:string};match?:{value:string}};
 type QdrantResponse={result?:{points?:Array<{id:string|number}>}};
-type EmbeddingResponse={data:Array<{embedding:number[]}>};
 
 export const GET=wrap(async request=>{
  const params=new URL(request.url).searchParams;
@@ -23,15 +22,15 @@ export const GET=wrap(async request=>{
  let vector:Post[]=[];
  let mode='lexical';
  let warning='';
- if(config('QDRANT_URL')&&config('OPENAI_API_KEY')){
+ if(config('QDRANT_URL')&&aiKey()){
   try{
    const currentUser=await user();
    await rate(currentUser.userId,'semantic',60);
-   const embedding=await provider<EmbeddingResponse>('embeddings',{model:config('EMBEDDING_MODEL')||'text-embedding-3-small',input:q,dimensions:1536});
+   const [queryVector]=await embed(q);
    const must:QdrantCondition[]=[{key:'publishedAt',range:{gte:after}}];
    if(lang!=='all')must.push({key:'language',match:{value:lang}});
    if(source!=='all')must.push({key:'source',match:{value:source}});
-   const response=await fetch(`${config('QDRANT_URL').replace(/\/$/,'')}/collections/${encodeURIComponent(config('QDRANT_COLLECTION')||'polylogue')}/points/query`,{method:'POST',headers:{'api-key':config('QDRANT_API_KEY'),'Content-Type':'application/json'},body:JSON.stringify({query:embedding.data[0].embedding,limit:60,with_payload:true,filter:{must}}),signal:AbortSignal.timeout(12000)});
+   const response=await fetch(`${config('QDRANT_URL').replace(/\/$/,'')}/collections/${encodeURIComponent(config('QDRANT_COLLECTION')||'polylogue')}/points/query`,{method:'POST',headers:{'api-key':config('QDRANT_API_KEY'),'Content-Type':'application/json'},body:JSON.stringify({query:queryVector,limit:60,with_payload:true,filter:{must}}),signal:AbortSignal.timeout(12000)});
    if(!response.ok)throw Error('vector');
    const data=await response.json() as QdrantResponse;
    const ids=(data.result?.points||[]).map(point=>String(point.id));
@@ -47,7 +46,7 @@ export const GET=wrap(async request=>{
  const scores=new Map<string,{post:Post;score:number}>();
  for(const list of [lexical,vector])list.forEach((post,index)=>{const old=scores.get(post.id);scores.set(post.id,{post,score:(old?.score||0)+1/(60+index+1)})});
  const results=[...scores.values()].sort((a,b)=>b.score-a.score).slice(0,30).map(item=>({...item.post,score:item.score}));
- if(params.get('rerank')==='1'&&results.length>1&&config('OPENAI_API_KEY')){
+ if(params.get('rerank')==='1'&&results.length>1&&aiKey()){
   try{
    const currentUser=await user();
    await rate(currentUser.userId,'rerank',30);
