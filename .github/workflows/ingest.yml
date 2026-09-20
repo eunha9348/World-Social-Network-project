@@ -58,6 +58,46 @@ jobs:
       - name: Validate structure
         run: python pipeline/index_corpus.py data/hn.jsonl --dry-run --max-documents "${{ inputs.max_documents }}"
 
+      # These four values are easy to confuse. Catch a swap here rather than after paying for
+      # annotation and embeddings, or after a run half-writes Qdrant and 403s on the site.
+      - name: Preflight secrets
+        if: ${{ inputs.dry_run == false }}
+        env:
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          SITE_URL: ${{ secrets.SITE_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: |
+          python - <<'PY'
+          import os, sys
+          g = lambda k: (os.environ.get(k) or '').strip()
+          problems = []
+          for k in ('GOOGLE_API_KEY', 'QDRANT_URL', 'QDRANT_API_KEY', 'SITE_URL', 'INGEST_TOKEN'):
+              if not g(k):
+                  problems.append(f'{k} is empty. Add it under Settings > Secrets and variables > Actions.')
+          site, qurl = g('SITE_URL'), g('QDRANT_URL')
+          if site and not site.startswith('https://'):
+              problems.append(f'SITE_URL must start with https:// (got {site[:30]!r})')
+          if site and 'qdrant' in site.lower():
+              problems.append('SITE_URL looks like the Qdrant cluster address. It is the address of '
+                              'your deployed VMAX site, where /api/ingest lives. The Qdrant address '
+                              'belongs in QDRANT_URL.')
+          if qurl and not qurl.startswith('https://'):
+              problems.append(f'QDRANT_URL must start with https:// (got {qurl[:30]!r})')
+          if site and qurl and site.rstrip('/') == qurl.rstrip('/'):
+              problems.append('SITE_URL and QDRANT_URL are the same value; they are different services.')
+          if g('INGEST_TOKEN') and g('INGEST_TOKEN') == g('QDRANT_API_KEY'):
+              problems.append('INGEST_TOKEN equals QDRANT_API_KEY. INGEST_TOKEN is a token you '
+                              'generate yourself and set identically on the deployed site; it is not '
+                              'a Qdrant credential.')
+          if problems:
+              for p in problems:
+                  print(f'::error::{p}')
+              sys.exit(1)
+          print('secrets look consistent')
+          PY
+
       - name: Index
         if: ${{ inputs.dry_run == false }}
         env:
