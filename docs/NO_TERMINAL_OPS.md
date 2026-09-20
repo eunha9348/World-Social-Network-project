@@ -155,15 +155,40 @@ POST /api/ingest  (틀린 토큰)    -> 403
 public으로 바꾼 뒤 403이 **401**로 바뀌면 게이트는 열렸고 이제 사이트 환경변수에
 `INGEST_TOKEN`이 없다는 뜻이다. 두 단계를 따로 통과해야 한다.
 
-### 3-2-2. 출처 선택
+### 3-2-2. 먼저 Probe sources를 돌린다
+
+Actions 탭 → **Probe sources** → Run workflow. 비용 0원, Secret 불필요, 쓰기 없음.
+
+후보 60개에 요청을 한 번씩 보내서 **지금 실제로 열려 있는 호스트만** 골라 준다.
+결과는 Summary 탭에 표로 나오고 마지막에 이런 줄이 붙는다.
+
+```
+mastodon: mastodon.social,mstdn.jp,...
+lemmy: lemmy.world,...
+stackexchange: stackoverflow,ja.stackoverflow,...
+discourse: discuss.python.org,...
+```
+
+이 줄을 그대로 복사해 Ingest corpus의 `hosts`에 붙여 넣는다.
+**코드에 적힌 후보 목록은 검증된 값이 아니다.** 인스턴스는 공개 타임라인을 닫거나
+이전하거나 사라지므로, 하드코딩된 목록은 시간이 지나면 썩는다. 그래서 목록을 믿지 말고
+매번 확인한 뒤 쓴다.
+
+### 3-2-3. 출처 선택
 
 `source` 입력으로 수집기를 고른다. 세 가지 모두 공개 API만 쓰며 스크래핑하지 않는다.
 
-| source | 무엇 | 언어 |
-|---|---|---|
-| `hn-search` (기본) | HN 공식 검색 API로 **주제를 지정해** 댓글 수집. 댓글에 원글 제목이 붙어 맥락이 남는다 | 사실상 영어 |
-| `mastodon` | 인스턴스별 공개 타임라인. 게시글에 `language` 필드가 있어 **수집 단계에서 언어를 거른다** | 인스턴스에 따라 다양 |
-| `hn-firehose` | 최신 글부터 역순 전체 수집. **주제가 없다** | 사실상 영어 |
+| source | 무엇 | 언어 | `hosts`에 넣는 값 |
+|---|---|---|---|
+| `hn-search` (기본) | HN 공식 검색 API로 **주제를 지정해** 댓글 수집. 댓글에 원글 제목이 붙어 맥락이 남는다 | 사실상 영어 | 사용 안 함 (`query` 사용) |
+| `mastodon` | 인스턴스별 공개 타임라인. 게시글에 `language` 필드가 있어 **수집 단계에서 언어를 거른다** | 인스턴스별로 다양 | 호스트명 |
+| `lemmy` | 공개 API로 댓글 수집. 댓글에 원글 제목이 붙는다 | 인스턴스별 | 호스트명 |
+| `stackexchange` | 공식 API 하나로 약 180개 사이트. **언어별 사이트가 따로 있다** | ja/ru/es/pt 등 | 사이트명 (`ja.stackoverflow`) |
+| `discourse` | 공개 Discourse 포럼. 같은 경로에서 JSON을 준다 | 포럼별 | 호스트명 |
+| `hn-firehose` | 최신 글부터 역순 전체 수집. **주제가 없다** | 사실상 영어 | 사용 안 함 |
+
+Mastodon 수집기는 Mastodon API를 구현한 다른 소프트웨어(Pleroma, Akkoma, GoToSocial 등)에도
+그대로 동작한다. 수집기를 늘리지 않고 `hosts`만 늘리면 출처가 늘어나는 구조다.
 
 `hn-firehose`는 주제 없이 그때그때 올라온 글을 가져오므로, 한 번 돌리면 로컬 LLM 얘기와
 문법 논쟁과 스토리지 설정이 뒤섞인다. 의견 검색용 corpus로는 쓸모가 낮으니

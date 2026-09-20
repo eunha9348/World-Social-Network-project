@@ -5,6 +5,10 @@ from index_corpus import LANGUAGE_CODE,normalize
 from evaluate import metrics
 from collect_mastodon import to_post
 from collect_hn import search_post
+from collect_lemmy import to_post as lemmy_post
+from collect_stackexchange import to_post as se_post
+from collect_discourse import to_post as discourse_post
+from common import clean_html,iso_z,usable
 class PipelineTests(unittest.TestCase):
  def test_recall_deduplicates(self):
   self.assertEqual(metrics(['a','b'],['a','a'])['recall@10'],.5)
@@ -43,6 +47,42 @@ class PipelineTests(unittest.TestCase):
   self.assertEqual(post['metadataVerified'],1)
   self.assertEqual(search_post({**hit,'author':''},'t')['metadataVerified'],0)
   self.assertIsNone(search_post({**hit,'comment_text':'too short'},'t'))
+ def test_common_helpers(self):
+  self.assertEqual(clean_html('<p>a</p><p>b</p>'),'a\nb')
+  self.assertEqual(clean_html('&amp;lt;'),'&lt;')
+  self.assertEqual(iso_z(1789000000),'2026-09-10T00:26:40Z')
+  self.assertEqual(iso_z('2026-09-20T13:00:00.000Z'),'2026-09-20T13:00:00Z')
+  self.assertFalse(usable('short'));self.assertTrue(usable('x'*40))
+ def test_lemmy_maps_comments_with_their_post_title(self):
+  entry={'comment':{'id':7,'content':'I disagree, '+'x'*60,'published':'2026-09-20T13:00:00Z',
+                    'ap_id':'https://lemmy.world/comment/7'},
+         'creator':{'name':'u','display_name':'User','actor_id':'https://lemmy.world/u/u'},
+         'post':{'name':'Is federation worth it'}}
+  post=lemmy_post(entry,'lemmy.world','2026-09-20T14:00:00Z')
+  self.assertEqual(post['title'],'Is federation worth it')
+  self.assertEqual(post['source'],'Lemmy (lemmy.world)')
+  self.assertEqual(post['authorHandle'],'u@lemmy.world')
+  self.assertTrue(normalize(post)['id'])
+  self.assertIsNone(lemmy_post({**entry,'comment':{**entry['comment'],'removed':True}},'i','t'))
+  self.assertIsNone(lemmy_post({**entry,'comment':{**entry['comment'],'ap_id':'http://x/1'}},'i','t'))
+ def test_stackexchange_does_not_pass_reputation_off_as_followers(self):
+  item={'question_id':5,'title':'Why is this slow','body':'<p>'+'x'*60+'</p>','creation_date':1789000000,
+        'link':'https://stackoverflow.com/q/5','owner':{'display_name':'Asker',
+        'link':'https://stackoverflow.com/users/1','reputation':4210}}
+  post=se_post(item,'stackoverflow','2026-09-20T14:00:00Z')
+  self.assertEqual(post['title'],'Why is this slow')
+  self.assertIsNone(post['followers'])
+  self.assertEqual(post['reputation'],4210)
+  self.assertTrue(normalize(post)['id'])
+ def test_discourse_builds_a_real_permalink(self):
+  topic={'id':42,'slug':'about-typing','title':'About typing'}
+  entry={'id':9,'post_number':3,'cooked':'<p>'+'x'*60+'</p>','created_at':'2026-09-20T13:00:00.000Z',
+         'username':'someone','display_username':'Someone'}
+  post=discourse_post(entry,topic,'discuss.python.org','2026-09-20T14:00:00Z')
+  self.assertEqual(post['url'],'https://discuss.python.org/t/about-typing/42/3')
+  self.assertEqual(post['title'],'About typing')
+  self.assertTrue(normalize(post)['id'])
+  self.assertIsNone(discourse_post({**entry,'cooked':'<p>hi</p>'},topic,'h','t'))
  def test_language_codes_are_not_limited_to_ui_filters(self):
   self.assertIsNotNone(LANGUAGE_CODE.fullmatch('uk'))
   self.assertIsNotNone(LANGUAGE_CODE.fullmatch('pt-BR'))

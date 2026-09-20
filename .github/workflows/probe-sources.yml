@@ -1,0 +1,41 @@
+# Which candidate hosts are actually reachable and open right now. Makes one cheap request each,
+# writes nothing, spends no model credits, and needs no secrets. Run it before trusting any
+# hardcoded instance list: instances close their public timelines, move, or disappear.
+name: Probe sources
+
+on:
+  workflow_dispatch:
+    inputs:
+      types:
+        description: 'Collector types to probe'
+        type: string
+        default: 'mastodon,lemmy,discourse,stackexchange'
+      hosts:
+        description: 'Override the candidate list, as type:host pairs. e.g. mastodon:mstdn.jp,lemmy:lemm.ee'
+        type: string
+        default: ''
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - name: Probe
+        env:
+          TYPES: ${{ inputs.types }}
+          HOSTS: ${{ inputs.hosts }}
+        run: |
+          python pipeline/probe_sources.py --types "$TYPES" --hosts "$HOSTS" | tee probe.txt
+          {
+            echo '## Source probe'
+            echo
+            sed -n '/^| type/,/candidates usable/p' probe.txt
+          } >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v6
+        with:
+          name: source-probe-${{ github.run_id }}
+          path: probe.txt
+          retention-days: 14
