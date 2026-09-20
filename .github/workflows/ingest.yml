@@ -28,8 +28,8 @@ jobs:
   ingest:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
 
@@ -37,7 +37,7 @@ jobs:
       # rerun resumes instead of re-paying for work already done. Cache entries can be evicted;
       # D1 and Qdrant both key on a deterministic id, so a cold run re-spends but never duplicates.
       - name: Restore ingestion checkpoints
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             data/hn.cursor
@@ -69,7 +69,7 @@ jobs:
 
       # Private to repository collaborators. Review the labels the model assigned before scaling up.
       - name: Upload this run's JSONL for review
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: corpus-${{ github.run_id }}
           path: data/hn.jsonl
