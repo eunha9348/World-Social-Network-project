@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="VMAX">
+  <defs>
+    <linearGradient id="vmax-icon-bg" x1="6" y1="5" x2="58" y2="60" gradientUnits="userSpaceOnUse"><stop stop-color="#10213d"/><stop offset="1" stop-color="#050a13"/></linearGradient>
+    <linearGradient id="vmax-icon-v" x1="10" y1="12" x2="35" y2="52" gradientUnits="userSpaceOnUse"><stop stop-color="#a5ccff"/><stop offset="1" stop-color="#4f89e8"/></linearGradient>
+  </defs>
+  <rect x="1.5" y="1.5" width="61" height="61" rx="15" fill="url(#vmax-icon-bg)" stroke="#31537f" stroke-width="3"/>
+  <path d="M9 13h10l9 28 10-28h10L34 53H23L9 13Z" fill="url(#vmax-icon-v)"/>
+  <path d="M39 44l10-12 8 10-5 6-3-4-4 5-6-5Z" fill="#f4f7fc"/>
+</svg>

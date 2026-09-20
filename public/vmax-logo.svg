@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 252 76" role="img" aria-label="VMAX">
+  <defs>
+    <linearGradient id="vmax-bg" x1="8" y1="6" x2="244" y2="70" gradientUnits="userSpaceOnUse"><stop stop-color="#10213d"/><stop offset="1" stop-color="#050a13"/></linearGradient>
+    <linearGradient id="vmax-blue" x1="15" y1="12" x2="66" y2="66" gradientUnits="userSpaceOnUse"><stop stop-color="#a5ccff"/><stop offset="1" stop-color="#4f89e8"/></linearGradient>
+  </defs>
+  <rect x="1.5" y="1.5" width="249" height="73" rx="17" fill="url(#vmax-bg)" stroke="#31537f" stroke-width="3"/>
+  <path d="M14 14h14l12 35 14-35h15L49 63H33L14 14Z" fill="url(#vmax-blue)"/>
+  <path d="M72 63V14h15l14 24 15-24h15v49h-13V36l-12 20H96L85 36v27H72Z" fill="#f4f7fc"/>
+  <path d="M135 63l20-49h16l20 49h-15l-4-11h-20l-4 11h-13Zm21-22h12l-6-16-6 16Z" fill="#f4f7fc" fill-rule="evenodd"/>
+  <path d="M187 14h16l11 14 11-14h16l-19 24 20 25h-16l-12-15-12 15h-16l20-25-19-24Z" fill="#f4f7fc"/>
+  <path d="M146 47h35" stroke="#6fa9ff" stroke-width="5" stroke-linecap="round"/>
+</svg>
