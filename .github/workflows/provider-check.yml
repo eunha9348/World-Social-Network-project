@@ -95,11 +95,14 @@ jobs:
               print(f'{len(ids)} models reachable with this key:\n')
               for i in ids:
                   print(f'  {i}')
-              hits = [i for i in ids if 'embed' in i.lower()]
-              print(f'\nembedding-capable ids in that list: {hits or "NONE"}')
-              if not hits:
-                  print('note: this endpoint may simply not list embedding models, '
-                        'which would make their absence meaningless. The probe below is decisive.')
+              # Gemini prefixes ids with "models/" but accepts the bare name in requests.
+              bare = {i.split('/')[-1] for i in ids}
+              hits = sorted(i for i in bare if 'embed' in i.lower())
+              print(f'\nembedding-capable ids: {hits or "NONE"}')
+              for label, want in (('chat', chat_model), ('embedding', embed_model)):
+                  if ids and want.split('/')[-1] not in bare:
+                      print(f'::warning::the {label} model {want} is not in this list; '
+                            f'check the id before relying on it')
 
           print('\n' + '=' * 70)
           print(f'2. CHAT      ({chat_model})')
