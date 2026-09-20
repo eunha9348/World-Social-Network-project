@@ -23,6 +23,14 @@ on:
         description: 'Must match the Qdrant collection'
         type: string
         default: '1536'
+      max_tokens:
+        description: 'Output budget per chat probe. A thinking model spends this before emitting JSON.'
+        type: string
+        default: '2000'
+      reasoning_effort:
+        description: 'Blank sends none. Try none/low/medium/high on a thinking model.'
+        type: string
+        default: ''
 
 jobs:
   check:
@@ -36,6 +44,8 @@ jobs:
         env:
           PROVIDER: ${{ inputs.provider }}
           CHAT_MODELS: ${{ inputs.chat_models }}
+          MAX_TOKENS: ${{ inputs.max_tokens }}
+          REASONING_EFFORT: ${{ inputs.reasoning_effort }}
           EMBEDDING_MODEL: ${{ inputs.embedding_model }}
           DIMENSIONS: ${{ inputs.dimensions }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
@@ -55,6 +65,8 @@ jobs:
           chat_models = [m.strip() for m in (os.environ.get('CHAT_MODELS') or default_chat).split(',') if m.strip()]
           embed_model = os.environ.get('EMBEDDING_MODEL') or default_embed
           dims = int(os.environ.get('DIMENSIONS') or 1536)
+          max_tokens = int(os.environ.get('MAX_TOKENS') or 2000)
+          effort = (os.environ.get('REASONING_EFFORT') or '').strip()
 
           # The key travels in a request header and is never echoed in a provider error body, but
           # scrub it anyway so the body can be shown. Hiding it entirely left failures undiagnosable.
@@ -115,19 +127,31 @@ jobs:
               print(f'\n--- {model} ---')
               if bare and model.split('/')[-1] not in bare:
                   print('::warning::not present in the model list above')
-              ok, res = call('chat/completions', {
+              body = {
                   'model': model,
                   'messages': [{'role': 'system', 'content': SYSTEM},
                                {'role': 'user', 'content': json.dumps(SAMPLE, ensure_ascii=False)}],
                   'response_format': {'type': 'json_object'},
-                  'max_tokens': 300})
+                  'max_tokens': max_tokens}
+              if effort:
+                  body['reasoning_effort'] = effort
+              ok, res = call('chat/completions', body)
               if not ok:
                   print(res)
                   continue
               try:
-                  content = res['choices'][0]['message']['content']
+                  choice = res['choices'][0]
+                  content = choice['message']['content']
               except (KeyError, IndexError, TypeError):
                   print(f'unexpected response shape: {json.dumps(res)[:400]}')
+                  continue
+              finish = choice.get('finish_reason')
+              usage = res.get('usage') or {}
+              print(f'finish_reason={finish}  usage={json.dumps(usage)}')
+              if finish == 'length':
+                  print(f'TRUNCATED at max_tokens={max_tokens}. This is a budget problem, not a '
+                        f'JSON-mode problem. A thinking model spends the budget reasoning before it '
+                        f'emits any JSON. Raise max_tokens or lower reasoning_effort.')
                   continue
               try:
                   parsed = json.loads(content)
