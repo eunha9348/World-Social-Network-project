@@ -1,5 +1,6 @@
-# Replaces the two verification curl commands in docs/CLOUDFLARE_GEMINI_SETUP.md for operators
-# without a shell. Run from the Actions tab; it spends one embedding call and nothing else.
+# Replaces the verification curl commands in docs/CLOUDFLARE_GEMINI_SETUP.md for operators without
+# a shell. Probes the model list, one chat call and one embedding call so a failure says which of
+# the three is broken. Spends at most one small chat call and one embedding call.
 name: Provider check
 
 on:
@@ -11,6 +12,10 @@ on:
         options: [gemini, openai]
         default: gemini
       embedding_model:
+        description: 'Blank uses the provider default'
+        type: string
+        default: ''
+      chat_model:
         description: 'Blank uses the provider default'
         type: string
         default: ''
@@ -27,10 +32,11 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - name: List models and verify embedding dimension
+      - name: Probe models, chat and embeddings
         env:
           PROVIDER: ${{ inputs.provider }}
           EMBEDDING_MODEL: ${{ inputs.embedding_model }}
+          CHAT_MODEL: ${{ inputs.chat_model }}
           DIMENSIONS: ${{ inputs.dimensions }}
           GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
@@ -38,42 +44,98 @@ jobs:
           python - <<'PY'
           import json, os, sys, urllib.request, urllib.error
           P = {'gemini': ('https://generativelanguage.googleapis.com/v1beta/openai',
-                          'GOOGLE_API_KEY', 'gemini-embedding-001'),
+                          'GOOGLE_API_KEY', 'gemini-embedding-001', 'gemini-2.5-flash'),
                'openai': ('https://api.openai.com/v1',
-                          'OPENAI_API_KEY', 'text-embedding-3-small')}
+                          'OPENAI_API_KEY', 'text-embedding-3-small', 'gpt-4.1-mini')}
           name = os.environ['PROVIDER']
-          base, key_env, default_model = P[name]
+          base, key_env, default_embed, default_chat = P[name]
           key = os.environ.get(key_env) or ''
           if not key:
               sys.exit(f'::error::{key_env} is not set. Add it under Settings > Secrets and variables > Actions.')
-          model = os.environ.get('EMBEDDING_MODEL') or default_model
+          embed_model = os.environ.get('EMBEDDING_MODEL') or default_embed
+          chat_model = os.environ.get('CHAT_MODEL') or default_chat
           dims = int(os.environ.get('DIMENSIONS') or 1536)
 
+          # The key travels in a request header and is never echoed in a provider error body, but
+          # scrub it anyway so the body can be shown. Hiding it entirely left failures undiagnosable.
+          def scrub(text):
+              return text.replace(key, '<REDACTED>') if key else text
+
           def call(path, body=None):
+              """Returns (ok, payload_or_error_text)."""
               req = urllib.request.Request(
                   f'{base}/{path}',
                   data=None if body is None else json.dumps(body).encode(),
                   headers={'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'})
               try:
                   with urllib.request.urlopen(req, timeout=60) as r:
-                      return json.load(r)
+                      return True, json.load(r)
               except urllib.error.HTTPError as e:
-                  sys.exit(f'::error::HTTP {e.code} from {path}; response body withheld so no key material is logged')
+                  detail = ''
+                  try:
+                      detail = e.read().decode('utf-8', 'replace')[:2000]
+                  except Exception:
+                      pass
+                  return False, f'HTTP {e.code} {e.reason}\n{scrub(detail)}'
+              except Exception as e:
+                  return False, f'{type(e).__name__}: {scrub(str(e))}'
 
-          ids = sorted(m.get('id', '') for m in call('models').get('data', []))
-          print(f'{len(ids)} models reachable with this key:')
-          for i in ids:
-              print(f'  {i}')
-          if model not in ids:
-              print(f'::warning::{model} is not in the list above. '
-                    f'The id may still work if the listing is partial, but check it before indexing.')
+          failures = []
 
-          vector = call('embeddings', {'model': model, 'input': '테스트 test', 'dimensions': dims}
-                        )['data'][0]['embedding']
-          print(f'\n{model} returned {len(vector)} dimensions (requested {dims})')
-          if len(vector) != dims:
-              sys.exit(f'::error::Provider ignored the `dimensions` parameter. Do NOT index yet: '
-                       f'either set EMBEDDING_DIMENSIONS={len(vector)} and build the Qdrant collection '
-                       f'at that size, or switch to the native endpoint. See docs/CLOUDFLARE_GEMINI_SETUP.md.')
-          print('\nOK. Index and query will agree at this dimension.')
+          print('=' * 70)
+          print(f'1. MODEL LIST  ({base}/models)')
+          print('=' * 70)
+          ok, res = call('models')
+          ids = []
+          if not ok:
+              print(res)
+              failures.append('models')
+          else:
+              ids = sorted(m.get('id', '') for m in res.get('data', []))
+              print(f'{len(ids)} models reachable with this key:\n')
+              for i in ids:
+                  print(f'  {i}')
+              hits = [i for i in ids if 'embed' in i.lower()]
+              print(f'\nembedding-capable ids in that list: {hits or "NONE"}')
+              if not hits:
+                  print('note: this endpoint may simply not list embedding models, '
+                        'which would make their absence meaningless. The probe below is decisive.')
+
+          print('\n' + '=' * 70)
+          print(f'2. CHAT      ({chat_model})')
+          print('=' * 70)
+          ok, res = call('chat/completions', {'model': chat_model,
+                                              'messages': [{'role': 'user', 'content': 'ping'}],
+                                              'max_tokens': 5})
+          if ok:
+              print('OK')
+          else:
+              print(res)
+              failures.append('chat')
+
+          print('\n' + '=' * 70)
+          print(f'3. EMBEDDINGS  ({embed_model}, dimensions={dims})')
+          print('=' * 70)
+          ok, res = call('embeddings', {'model': embed_model, 'input': '테스트 test', 'dimensions': dims})
+          if not ok:
+              print(res)
+              failures.append('embeddings')
+          else:
+              got = len(res['data'][0]['embedding'])
+              print(f'returned {got} dimensions (requested {dims})')
+              if got != dims:
+                  print(f'::error::Provider ignored the `dimensions` parameter. Do NOT index yet: '
+                        f'either set EMBEDDING_DIMENSIONS={got} and build the Qdrant collection at '
+                        f'that size, or switch to the native endpoint.')
+                  failures.append('dimensions')
+              else:
+                  print('OK. Index and query will agree at this dimension.')
+
+          print('\n' + '=' * 70)
+          if failures:
+              print(f'FAILED: {", ".join(failures)}')
+              print('A 402/429 on chat AND embeddings points at account billing or quota.')
+              print('A 402/404 on embeddings only points at that model id or its tier.')
+              sys.exit(1)
+          print('ALL CHECKS PASSED')
           PY
