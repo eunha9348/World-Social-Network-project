@@ -1,0 +1,77 @@
+# Manual corpus ingestion for operators without a shell. Both pipeline scripts are standard
+# library only, so the runner needs no dependency install. Every run spends model credits unless
+# dry_run stays on, so this is workflow_dispatch only and never fires on push.
+name: Ingest corpus
+
+on:
+  workflow_dispatch:
+    inputs:
+      collect_limit:
+        description: 'Hacker News items to collect this run'
+        type: string
+        default: '50'
+      max_documents:
+        description: 'Documents to index this run (each one costs an annotation and an embedding call)'
+        type: string
+        default: '20'
+      dry_run:
+        description: 'Validate input structure only. No model calls, no writes.'
+        type: boolean
+        default: true
+
+# The checkpoint files are shared state; overlapping runs would double-spend and skip items.
+concurrency:
+  group: ingest-corpus
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # data/ is gitignored. The cache carries the HN cursor and the annotation checkpoint so a
+      # rerun resumes instead of re-paying for work already done. Cache entries can be evicted;
+      # D1 and Qdrant both key on a deterministic id, so a cold run re-spends but never duplicates.
+      - name: Restore ingestion checkpoints
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/hn.cursor
+            data/index.sqlite
+          key: vmax-ingest-${{ github.run_id }}
+          restore-keys: vmax-ingest-
+
+      - name: Collect from the official Hacker News API
+        run: python pipeline/collect_hn.py --limit "${{ inputs.collect_limit }}" --output data/hn.jsonl
+
+      - name: Validate structure
+        run: python pipeline/index_corpus.py data/hn.jsonl --dry-run --max-documents "${{ inputs.max_documents }}"
+
+      - name: Index
+        if: ${{ inputs.dry_run == false }}
+        env:
+          AI_PROVIDER: ${{ vars.AI_PROVIDER || 'gemini' }}
+          GOOGLE_API_KEY: ${{ secrets.GOOGLE_API_KEY }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          LLM_MODEL: ${{ vars.LLM_MODEL }}
+          EMBEDDING_MODEL: ${{ vars.EMBEDDING_MODEL }}
+          EMBEDDING_DIMENSIONS: ${{ vars.EMBEDDING_DIMENSIONS || '1536' }}
+          QDRANT_URL: ${{ secrets.QDRANT_URL }}
+          QDRANT_API_KEY: ${{ secrets.QDRANT_API_KEY }}
+          QDRANT_COLLECTION: ${{ vars.QDRANT_COLLECTION || 'polylogue' }}
+          SITE_URL: ${{ secrets.SITE_URL }}
+          INGEST_TOKEN: ${{ secrets.INGEST_TOKEN }}
+        run: python pipeline/index_corpus.py data/hn.jsonl --max-documents "${{ inputs.max_documents }}"
+
+      # Private to repository collaborators. Review the labels the model assigned before scaling up.
+      - name: Upload this run's JSONL for review
+        uses: actions/upload-artifact@v4
+        with:
+          name: corpus-${{ github.run_id }}
+          path: data/hn.jsonl
+          retention-days: 7
+          if-no-files-found: warn
