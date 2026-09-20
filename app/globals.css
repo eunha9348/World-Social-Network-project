@@ -88,3 +88,12 @@ html[data-theme=light] .earth-card-grid article>div span{background:#e9f2ff;bord
 
 /* UQ monogram sizing across the site and browser-facing brand surfaces. */
 .landing-logo img{width:100px;height:30px;object-fit:contain}.sidebar-brand img{width:112px;height:34px;object-fit:contain}.landing-footer .landing-logo img{width:88px;height:27px}@media(max-width:640px){.earth-landing .landing-logo img{width:82px;height:25px}}
+
+/* Catalog status: says whether a source is readable today, so an empty card is not ambiguous. */
+.source-status{display:inline-block;margin:.35rem 0 0;padding:.2rem .55rem;border-radius:999px;font-size:.75rem;line-height:1.5;border:1px solid transparent}
+.source-status.status-live{color:#0b7a4b;background:#0b7a4b1a;border-color:#0b7a4b40}
+.source-status.status-open{color:#1d4ed8;background:#1d4ed81a;border-color:#1d4ed840}
+.source-status.status-pending{color:#6b7280;background:#6b72801a;border-color:#6b728040}
+:root[data-theme="dark"] .source-status.status-live{color:#4ade80;background:#4ade8014;border-color:#4ade8033}
+:root[data-theme="dark"] .source-status.status-open{color:#93b4ff;background:#93b4ff14;border-color:#93b4ff33}
+:root[data-theme="dark"] .source-status.status-pending{color:#9ca3af;background:#9ca3af14;border-color:#9ca3af33}
