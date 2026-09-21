@@ -31,6 +31,21 @@ class PipelineTests(unittest.TestCase):
   self.assertEqual(post['publishedAt'],'2026-09-20T13:00:00Z')
   self.assertIn('\n',post['body'])
   self.assertTrue(normalize(post)['id'])
+ def test_mastodon_credits_the_publishing_instance_not_the_queried_one(self):
+  # A hashtag timeline is federated: planet.moe serves posts that live on uri.life.
+  body='\ubc18\ub3c4\uccb4 \uc785\uad6d \uc131\uc7a5 \ubaa8\ub378\uc5d0 \ub300\ud55c \uae34 \uc758\uacac\uc785\ub2c8\ub2e4. \uc804\uc0b0\uc5c5\uc758 \ubc18\ub3c4\uccb4\ud654\ub97c \uc6b0\ub824\ud55c\ub2e4\ub294 \ucde8\uc9c0\ub85c \ucda9\ubd84\ud788 \uae38\uac8c \uc791\uc131\ud569\ub2c8\ub2e4.'
+  remote={'id':'11','created_at':'2026-09-20T13:00:00.000Z','language':'ko',
+          'url':'https://uri.life/@yeokbo/116878971218588875','content':'<p>'+body+'</p>',
+          'sensitive':False,'reblog':None,'spoiler_text':'',
+          'account':{'username':'yeokbo','acct':'yeokbo@uri.life','display_name':'y',
+                     'url':'https://uri.life/@yeokbo','followers_count':10}}
+  post=to_post(remote,'planet.moe','2026-09-20T14:00:00Z')
+  self.assertEqual(post['source'],'Mastodon (uri.life)')
+  self.assertEqual(post['authorHandle'],'yeokbo@uri.life')
+  local={**remote,'url':'https://planet.moe/@l/1',
+         'account':{'username':'l','acct':'l','display_name':'l','url':'https://planet.moe/@l','followers_count':1}}
+  self.assertEqual(to_post(local,'planet.moe','t')['source'],'Mastodon (planet.moe)')
+  self.assertEqual(to_post(local,'planet.moe','t')['authorHandle'],'l@planet.moe')
  def test_mastodon_skips_what_is_not_the_authors_own_public_text(self):
   status={'id':'11','created_at':'2026-09-20T13:00:00.000Z','url':'https://mstdn.jp/@a/11',
           'content':'<p>'+'a'*60+'</p>','sensitive':False,'reblog':None,'spoiler_text':'','account':{'acct':'a'}}

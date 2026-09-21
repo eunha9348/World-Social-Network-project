@@ -16,8 +16,16 @@ def clean(markup):
     """Mastodon content is HTML; keep paragraph breaks and drop the rest."""
     return html.unescape(TAG.sub('',BREAK.sub('\n',markup or ''))).strip()
 
+def origin(url,fallback):
+    """The host that actually published the post, not the one we queried."""
+    host=urllib.parse.urlparse(url).netloc
+    return host or fallback
+
 def to_post(status,instance,observed_at):
-    """Map one status onto the ingest schema, or None when it is not usable original text."""
+    """Map one status onto the ingest schema, or None when it is not usable original text.
+
+    A tag timeline is federated, so `instance` is where we read the post, not where it lives.
+    """
     if not isinstance(status,dict):return None
     if status.get('reblog'):return None                      # a boost is not the account's own text
     if status.get('sensitive'):return None                   # content-warned posts stay out
@@ -27,10 +35,11 @@ def to_post(status,instance,observed_at):
     if len(body)<40 or len(body)>12000:return None           # normalize() would reject these anyway
     account=status.get('account') or {}
     handle=account.get('acct') or account.get('username') or ''
-    if handle and '@' not in handle:handle=f'{handle}@{instance}'
+    if handle and '@' not in handle:handle=f'{handle}@{origin(account.get("url") or url,instance)}'
     spoiler=clean(status.get('spoiler_text'))
     followers=account.get('followers_count')
-    return {'title':(spoiler or body)[:120],'body':body,'source':f'Mastodon ({instance})',
+    home=origin(url,instance)
+    return {'title':(spoiler or body)[:120],'body':body,'source':f'Mastodon ({home})',
             'authorName':clean(account.get('display_name')) or account.get('username') or '',
             'authorHandle':handle,'authorUrl':account.get('url') or '',
             'authorEvidenceUrl':f'https://{instance}/api/v1/statuses/{status.get("id")}',
@@ -74,14 +83,18 @@ def main():
     per_language={};written=0;skipped=0;seen=set();unreachable=[]
 
     tags=[t.strip().lstrip('#') for t in a.hashtags.split(',') if t.strip()] or ['']
+    # Budget per instance-and-tag pair. Federated timelines overlap heavily, so without this one
+    # instance answers first and fills the quota alone.
+    per_combo=max(1,a.limit//max(1,len(instances)*len(tags)))
     with out.open('a',encoding='utf-8') as f:
         for instance in instances:
           for tag in tags:
             if written>=a.limit:break
+            combo_written=0
             key=f'{instance}#{tag}' if tag else instance
             max_id=cursors.get(key)
             for _ in range(a.pages):
-                if written>=a.limit:break
+                if written>=a.limit or combo_written>=per_combo:break
                 query={'limit':40}
                 if max_id:query['max_id']=max_id
                 statuses=None
@@ -98,6 +111,7 @@ def main():
                 max_id=str(statuses[-1].get('id'))
                 observed_at=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
                 for status in statuses:
+                    if combo_written>=per_combo:break
                     post=to_post(status,instance,observed_at)
                     if not post:skipped+=1;continue
                     language=(post.get('language') or '').split('-')[0]
@@ -108,12 +122,12 @@ def main():
                     # language is a hint for balancing only; index_corpus still derives its own.
                     f.write(json.dumps({k:v for k,v in post.items() if k!='language'},ensure_ascii=False)+'\n')
                     f.flush()
-                    per_language[language]=per_language.get(language,0)+1;written+=1
+                    per_language[language]=per_language.get(language,0)+1;written+=1;combo_written+=1
                     if written>=a.limit:break
                 cursors[key]=max_id
                 cursor_path.write_text(json.dumps(cursors))
                 time.sleep(1)                                 # be a polite guest on someone's server
     print(json.dumps({'collected':written,'skipped':skipped,'output':str(out),
-                      'per_language':per_language,'hashtags':tags if tags!=[''] else [],'unreachable':unreachable},ensure_ascii=False,indent=2))
+                      'per_language':per_language,'per_combo_budget':per_combo,'hashtags':tags if tags!=[''] else [],'unreachable':unreachable},ensure_ascii=False,indent=2))
 
 if __name__=='__main__':main()
