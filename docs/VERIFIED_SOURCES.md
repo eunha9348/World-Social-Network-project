@@ -74,6 +74,30 @@ hosts: planet.moe,twingyeo.kr,qdon.space,uri.life
 | lemm.ee | JSONDecodeError | JSON 대신 HTML 응답. 서비스 종료로 보인다 |
 | feddit.uk | RemoteDisconnected | 연결이 끊긴다. 나중에 재확인 |
 
+## 온디맨드 수집(`/api/collect`)이 실제로 묻는 곳
+
+검색이 0건일 때 사이트가 직접 부르는 출처다. 전부 병렬로 묻고, 답하지 않아도 그만이다.
+
+| 출처 | 엔드포인트 | 비고 |
+|---|---|---|
+| Mastodon | 해시태그 타임라인 | 연합이라 지정한 인스턴스보다 훨씬 넓게 닿는다 |
+| Hacker News | 공식 검색 API | 영어 |
+| Lemmy | `/api/v3/search` | 영어 위주. 한국어 질의는 빈손으로 돌아온다 |
+| Stack Exchange | `/search/advanced` | 영어 위주 |
+| 뉴스 | Google News RSS 검색 + `NEWS_FEEDS` | 아래 주의 |
+
+### 뉴스는 기사 본문이 아니다
+
+저장하는 것은 **헤드라인과 발행사가 RSS로 배포한 요약**이며, `url`은 원문 기사를 가리킨다.
+기사 본문을 가져오지 않는 이유는 그것이 저작물 복제이기 때문이다. RSS는 배포를 위해
+발행되는 것이므로 제목과 요약을 저장하는 것은 그 용도에 맞다.
+
+요약이 짧아 40자 미만이면 그 항목은 저장하지 않는다. 채우지 않고 버린다.
+그래서 요약을 싣지 않는 피드는 아무것도 기여하지 못한다.
+
+`NEWS_FEEDS`에 발행사 RSS 주소를 쉼표로 넣으면 Google News 검색과 함께 사용한다.
+발행사 피드가 대체로 요약을 더 충실히 싣는다.
+
 ## 주의
 
 - Stack Exchange 무인증 quota는 하루 300회다. 프로브 한 번에 18회를 쓴다.

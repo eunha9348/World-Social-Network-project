@@ -1,6 +1,6 @@
 import {z} from 'zod';
 import {wrap,db,config,user,rate,sameOrigin,json,ai,embed,aiKey,embedDimensions,ApiError} from '@/lib/server';
-import {fromHackerNews,fromMastodon,planFor,type Draft} from '@/lib/collect';
+import {fromHackerNews,fromMastodon,fromLemmy,fromStackExchange,fromFeeds,newsSearchFeeds,planFor,type Draft} from '@/lib/collect';
 
 // Collect on demand, from the site, for a query that found nothing stored. The worker may call out
 // even though ChatGPT Sites refuses inbound server-to-server calls, and D1 is a binding, so the
@@ -27,9 +27,18 @@ export const POST=wrap(async request=>{
  const since=new Date(Date.now()-(days||365)*86400000).toISOString();
  const plan=planFor(q);
 
+ // Every source is asked in parallel and none is required to answer. A Korean query simply comes
+ // back empty from the English-dominant ones, which is cheaper than deciding in advance.
+ // NEWS_FEEDS adds publisher RSS alongside the Google News search.
+ const curated=config('NEWS_FEEDS').split(',').map(f=>f.trim()).filter(f=>f.startsWith('https://'));
+ const share=Math.ceil(MAX_DOCUMENTS/2);
  const batches=await Promise.all([
-  plan.tags.length?fromMastodon(plan.hosts,plan.tags,MAX_DOCUMENTS,since,plan.korean?'ko':undefined):Promise.resolve([]),
-  fromHackerNews(q,MAX_DOCUMENTS,since)]);
+  plan.tags.length?fromMastodon(plan.hosts,plan.tags,share,since,plan.korean?'ko':undefined):Promise.resolve([]),
+  fromHackerNews(q,share,since),
+  fromLemmy(q,share,since),
+  fromStackExchange(q,share,since),
+  fromFeeds([...newsSearchFeeds(q,plan.korean),...curated],share,since)
+ ].map(p=>Promise.resolve(p).catch(()=>[] as Draft[])));
  const byUrl=new Map<string,Draft>();
  for(const draft of batches.flat())if(!byUrl.has(draft.url))byUrl.set(draft.url,draft);
  let drafts=[...byUrl.values()];

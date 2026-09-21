@@ -10,6 +10,8 @@
 // workflow before trusting it again.
 const KOREAN=['planet.moe','twingyeo.kr','qdon.space','uri.life'];
 const GENERAL=['mastodon.world','mas.to','fosstodon.org','mstdn.jp','troet.cafe','piaille.fr'];
+const LEMMY=['lemmy.world','programming.dev','sh.itjust.works','lemmy.ml'];
+const SE_SITES=['stackoverflow','workplace','money','politics','philosophy','skeptics'];
 const HANGUL=/[ㄱ-힝]/;
 
 export type Draft={id:string;title:string;body:string;language:string;source:string;url:string;
@@ -123,10 +125,123 @@ export async function fromMastodon(hosts:string[],tags:string[],limit:number,sin
  return out;
 }
 
+/** Lemmy's search endpoint. English-dominant, so a Korean query simply comes back empty. */
+export async function fromLemmy(query:string,limit:number,since:string):Promise<Draft[]>{
+ const out:Draft[]=[];const perHost=Math.max(1,Math.ceil(limit/LEMMY.length));
+ for(const host of LEMMY){
+  if(out.length>=limit)break;
+  let taken=0;
+  const data=await getJson(`https://${host}/api/v3/search?`+new URLSearchParams(
+   {q:query,type_:'Comments',sort:'New',limit:'20'})) as Json|null;
+  for(const entry of ((data?.comments as Json[])||[])){
+   if(taken>=perHost||out.length>=limit)break;
+   const comment=(entry.comment as Json)||{},creator=(entry.creator as Json)||{},parent=(entry.post as Json)||{};
+   if(comment.deleted||comment.removed)continue;
+   const url=(comment.ap_id as string)||'';
+   const published=comment.published?new Date(String(comment.published)).toISOString():'';
+   if(!published||published<since)continue;
+   const body=clean((comment.content as string)||'');
+   const name=(creator.name as string)||'';
+   const home=url.startsWith('https://')?new URL(url).hostname:host;
+   const draft=await finish({title:clean((parent.name as string)||'')||body.slice(0,120),body,language:'',
+    source:`Lemmy (${home})`,url,publishedAt:published,collectedAt:new Date().toISOString(),
+    authorName:(creator.display_name as string)||name,authorHandle:name?`${name}@${home}`:'',
+    authorUrl:(creator.actor_id as string)||'',
+    authorEvidenceUrl:`https://${host}/api/v3/comment?id=${comment.id}`,
+    authorObservedAt:new Date().toISOString(),metadataVerified:name?1:0,followers:null,
+    profession:'',professionEvidenceUrl:''});
+   if(draft){out.push(draft);taken++}
+  }
+ }
+ return out;
+}
+
+/** Stack Exchange full-text search. Reputation is a site score, never reported as an audience. */
+export async function fromStackExchange(query:string,limit:number,since:string):Promise<Draft[]>{
+ const out:Draft[]=[];const perSite=Math.max(1,Math.ceil(limit/SE_SITES.length));
+ for(const site of SE_SITES){
+  if(out.length>=limit)break;
+  let taken=0;
+  const data=await getJson('https://api.stackexchange.com/2.3/search/advanced?'+new URLSearchParams(
+   {q:query,site,order:'desc',sort:'relevance',pagesize:'20',filter:'withbody'})) as Json|null;
+  for(const item of ((data?.items as Json[])||[])){
+   if(taken>=perSite||out.length>=limit)break;
+   const link=(item.link as string)||'';
+   const created=item.creation_date as number;
+   if(typeof created!=='number')continue;
+   const publishedAt=new Date(created*1000).toISOString();
+   if(publishedAt<since)continue;
+   const owner=(item.owner as Json)||{};
+   const name=clean((owner.display_name as string)||'');
+   const profile=(owner.link as string)||'';
+   const draft=await finish({title:clean((item.title as string)||''),body:clean((item.body as string)||''),
+    language:'',source:`Stack Exchange (${site})`,url:link,publishedAt,collectedAt:new Date().toISOString(),
+    authorName:name,authorHandle:name,authorUrl:profile.startsWith('https://')?profile:'',
+    authorEvidenceUrl:`https://api.stackexchange.com/2.3/questions/${item.question_id}?site=${site}`,
+    authorObservedAt:new Date().toISOString(),metadataVerified:name&&profile?1:0,followers:null,
+    profession:'',professionEvidenceUrl:''});
+   if(draft){out.push(draft);taken++}
+  }
+ }
+ return out;
+}
+
+// RSS is published for syndication, so the headline and the summary a publisher chose to syndicate
+// are fair to store. The article body is not fetched: that would be copying the piece, and the row
+// links to the original instead. A feed whose summary is too thin to stand alone is skipped rather
+// than padded, which is why some feeds contribute nothing.
+const between=(xml:string,tag:string)=>{
+ const m=xml.match(new RegExp(`<${tag}[^>]*>([\\s\\S]*?)</${tag}>`,'i'));
+ return m?clean(m[1].replace(/<!\[CDATA\[|\]\]>/g,'')):'';
+};
+
+export async function fromFeeds(feeds:string[],limit:number,since:string):Promise<Draft[]>{
+ const out:Draft[]=[];const perFeed=Math.max(1,Math.ceil(limit/Math.max(1,feeds.length)));
+ for(const feed of feeds){
+  if(out.length>=limit)break;
+  let taken=0;
+  let xml='';
+  try{
+   const response=await fetch(feed,{headers:{'User-Agent':'vmax-corpus-collector/1.0'},signal:AbortSignal.timeout(8000)});
+   if(!response.ok)continue;
+   xml=await response.text();
+  }catch{continue}
+  const host=new URL(feed).hostname;
+  for(const chunk of xml.split(/<item[\s>]|<entry[\s>]/).slice(1)){
+   if(taken>=perFeed||out.length>=limit)break;
+   const title=between(chunk,'title');
+   const summary=between(chunk,'description')||between(chunk,'summary')||between(chunk,'content:encoded');
+   const linkMatch=chunk.match(/<link[^>]*href="([^"]+)"/i);
+   const link=linkMatch?linkMatch[1]:between(chunk,'link');
+   const date=between(chunk,'pubDate')||between(chunk,'published')||between(chunk,'updated');
+   if(!title||!link.startsWith('https://'))continue;
+   let publishedAt='';
+   try{publishedAt=new Date(date).toISOString()}catch{continue}
+   if(!publishedAt||publishedAt<since)continue;
+   const outlet=between(chunk,'source')||new URL(link).hostname;
+   // Headline plus the syndicated summary is the stored text, and it is labelled as such.
+   const body=[title,summary].filter(Boolean).join('\n');
+   const draft=await finish({title,body,language:'',source:`뉴스 (${outlet})`,url:link,publishedAt,
+    collectedAt:new Date().toISOString(),authorName:outlet,authorHandle:'',authorUrl:`https://${new URL(link).hostname}`,
+    authorEvidenceUrl:feed,authorObservedAt:new Date().toISOString(),metadataVerified:0,followers:null,
+    profession:'',professionEvidenceUrl:''});
+   if(draft){out.push(draft);taken++}
+  }
+  void host;
+ }
+ return out;
+}
+
+/** Google News runs a searchable RSS endpoint, which is how a topic reaches the news at all. */
+export function newsSearchFeeds(query:string,korean:boolean){
+ const locale=korean?{hl:'ko',gl:'KR',ceid:'KR:ko'}:{hl:'en-US',gl:'US',ceid:'US:en'};
+ return ['https://news.google.com/rss/search?'+new URLSearchParams({q:query,...locale})];
+}
+
 /** Which sources plausibly hold this query. Korean text goes to the Korean instances, always HN. */
 export function planFor(query:string){
  const korean=HANGUL.test(query);
  const tags=query.split(/\s+/).map(t=>t.replace(/[^\p{L}\p{N}]/gu,'')).filter(t=>t.length>=2).slice(0,3);
  return {korean,tags,hosts:korean?KOREAN:GENERAL,
-         sources:[korean?'Mastodon (한국어 인스턴스)':'Mastodon','Hacker News']};
+         sources:[korean?'Mastodon (한국어 인스턴스)':'Mastodon','Hacker News','Lemmy','Stack Exchange','뉴스']};
 }
