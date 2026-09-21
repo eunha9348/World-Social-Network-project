@@ -31,6 +31,7 @@ def main():
     p.add_argument('--output',default='data/lemmy.jsonl')
     p.add_argument('--cursor',default='data/lemmy.cursor')
     p.add_argument('--pages',type=int,default=15)
+    p.add_argument('--query',default='',help='subject to search for. Without it the comment feed has no subject.')
     a=p.parse_args()
     out=Path(a.output);out.parent.mkdir(parents=True,exist_ok=True)
     cp=Path(a.cursor);cp.parent.mkdir(parents=True,exist_ok=True)
@@ -45,8 +46,11 @@ def main():
                 # Lemmy 1.x moved the API to /api/v4; try both rather than call the host dead.
                 data=None
                 for version in ('v3','v4'):
-                    url=f'https://{instance}/api/{version}/comment/list?'+urllib.parse.urlencode(
-                        {'type_':'All','sort':'New','limit':50,'page':page})
+                    url=(f'https://{instance}/api/{version}/search?'+urllib.parse.urlencode(
+                            {'q':a.query,'type_':'Comments','sort':'New','limit':50,'page':page})
+                         if a.query else
+                         f'https://{instance}/api/{version}/comment/list?'+urllib.parse.urlencode(
+                            {'type_':'All','sort':'New','limit':50,'page':page}))
                     try:
                         data=get_json(url)
                         if isinstance((data or {}).get('comments'),list):break
@@ -65,6 +69,6 @@ def main():
                 page+=1;cursors[instance]=page;cp.write_text(json.dumps(cursors))
                 time.sleep(1)
     print(json.dumps({'collected':written,'skipped':skipped,'output':str(out),
-                      'unreachable':unreachable},ensure_ascii=False,indent=2))
+                      'query':a.query,'unreachable':unreachable},ensure_ascii=False,indent=2))
 
 if __name__=='__main__':main()

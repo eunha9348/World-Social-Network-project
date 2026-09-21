@@ -16,7 +16,7 @@ on:
         options: [hn-search, mastodon, lemmy, stackexchange, discourse, hn-firehose]
         default: hn-search
       query:
-        description: 'Subject, for hn-search. The corpus is only as focused as this.'
+        description: 'Subject. hn-search and lemmy search for it; mastodon reads it as comma-separated hashtags. Blank means no subject, which is how a corpus ends up about nothing.'
         type: string
         default: 'artificial intelligence'
       hosts:
@@ -120,9 +120,10 @@ jobs:
                 --output data/corpus.jsonl --cursor "data/hn$SUFFIX.cursor" ;;
             mastodon)
               python pipeline/collect_mastodon.py --instances "$HOSTS" --languages "$LANGUAGES" \
+                --hashtags "$QUERY" \
                 --limit "$LIMIT" --output data/corpus.jsonl --cursor "data/mastodon$SUFFIX.cursor" ;;
             lemmy)
-              python pipeline/collect_lemmy.py --instances "$HOSTS" \
+              python pipeline/collect_lemmy.py --instances "$HOSTS" --query "$QUERY" \
                 --limit "$LIMIT" --output data/corpus.jsonl --cursor "data/lemmy$SUFFIX.cursor" ;;
             stackexchange)
               python pipeline/collect_stackexchange.py --sites "$HOSTS" \

@@ -63,6 +63,7 @@ def main():
     p.add_argument('--output',default='data/mastodon.jsonl')
     p.add_argument('--cursor',default='data/mastodon.cursor')
     p.add_argument('--pages',type=int,default=20,help='maximum timeline pages per instance per run')
+    p.add_argument('--hashtags',default='',help='comma-separated tags. Without them the public timeline returns whatever was posted, on no subject.')
     a=p.parse_args()
 
     out=Path(a.output);out.parent.mkdir(parents=True,exist_ok=True)
@@ -72,21 +73,27 @@ def main():
     instances=[host.strip() for host in a.instances.split(',') if host.strip()]
     per_language={};written=0;skipped=0;seen=set();unreachable=[]
 
+    tags=[t.strip().lstrip('#') for t in a.hashtags.split(',') if t.strip()] or ['']
     with out.open('a',encoding='utf-8') as f:
         for instance in instances:
+          for tag in tags:
             if written>=a.limit:break
-            max_id=cursors.get(instance)
+            key=f'{instance}#{tag}' if tag else instance
+            max_id=cursors.get(key)
             for _ in range(a.pages):
                 if written>=a.limit:break
                 query={'limit':40}
                 if max_id:query['max_id']=max_id
                 statuses=None
-                for scope in ({},{'local':'true'}):
-                    url=f'https://{instance}/api/v1/timelines/public?'+urllib.parse.urlencode({**query,**scope})
+                # A tag timeline takes no scope parameter; the public one needs local=true on
+                # builds that reject an unscoped request with 422.
+                path=(f'/api/v1/timelines/tag/{urllib.parse.quote(tag)}' if tag else '/api/v1/timelines/public')
+                for scope in ({},{'local':'true'}) if not tag else ({},):
+                    url=f'https://{instance}{path}?'+urllib.parse.urlencode({**query,**scope})
                     try:statuses=get(url);break
                     except Exception as e:reason=type(e).__name__
                 if statuses is None:
-                    unreachable.append({'instance':instance,'reason':reason});break
+                    unreachable.append({'instance':key,'reason':reason});break
                 if not isinstance(statuses,list) or not statuses:break
                 max_id=str(statuses[-1].get('id'))
                 observed_at=datetime.now(timezone.utc).isoformat().replace('+00:00','Z')
@@ -103,10 +110,10 @@ def main():
                     f.flush()
                     per_language[language]=per_language.get(language,0)+1;written+=1
                     if written>=a.limit:break
-                cursors[instance]=max_id
+                cursors[key]=max_id
                 cursor_path.write_text(json.dumps(cursors))
                 time.sleep(1)                                 # be a polite guest on someone's server
     print(json.dumps({'collected':written,'skipped':skipped,'output':str(out),
-                      'per_language':per_language,'unreachable':unreachable},ensure_ascii=False,indent=2))
+                      'per_language':per_language,'hashtags':tags if tags!=[''] else [],'unreachable':unreachable},ensure_ascii=False,indent=2))
 
 if __name__=='__main__':main()
