@@ -21,12 +21,19 @@ ZIP: https://github.com/eunha9348/World-Social-Network-project/archive/refs/head
 - DB 스키마와 drizzle/ 마이그레이션은 이번 변경에서 건드리지 않았습니다.
   새 마이그레이션이 필요 없고, 기존 데이터도 유지되어야 합니다.
 
-[이번에 달라진 것]
-- /admin/ingest 관리자 업로드 페이지 신규 추가 (가장 중요. 이게 있어야 원문을 넣을 수 있습니다)
-- LLM 공급자를 OpenAI에서 Google Gemini로 전환 (lib/server.ts)
-- 검색 라우트가 공급자 공통 임베딩 함수를 사용 (app/api/search/route.ts)
-- 출처 목록에 연동 상태 필드와 배지 추가 (lib/sources.ts, app/source-atlas.tsx, app/globals.css)
-- pipeline/ 수집기 추가 (서버 런타임과 무관, 배포에 영향 없음)
+[이번에 달라진 것 — 버전 26 대비]
+- /api/collect 라우트 신규 추가 (가장 중요)
+  검색 결과가 0건일 때 사이트가 직접 원문을 수집해 DB에 저장합니다.
+  Mastodon 해시태그 타임라인, Hacker News 검색, Lemmy 검색, Stack Exchange 검색,
+  뉴스 RSS(Google News 검색 + NEWS_FEEDS)를 병렬로 조회한 뒤
+  이미 저장된 문서를 제외하고, Gemini로 분류하고, 임베딩해서 D1과 Qdrant에 씁니다.
+  ChatGPT Sites는 들어오는 서버 간 호출만 403으로 막고 나가는 호출은 막지 않으며,
+  D1은 HTTP가 아니라 바인딩이므로 이 경로가 성립합니다.
+- lib/collect.ts 신규 (수집기의 TypeScript 구현)
+- app/workspace.tsx: 검색 결과가 비었을 때 "이 주제 지금 수집하기" 버튼 노출
+
+[버전 26에 이미 들어간 것 — 참고]
+- /admin/ingest 업로드 페이지, Gemini 전환, 검색 관련도 수정, 출처 상태 배지
 
 [환경 변수]
 사이트 설정의 환경 변수에 아래를 넣어 주세요. Secret 표시된 값은 코드에 넣지 마세요.
@@ -41,16 +48,20 @@ ZIP: https://github.com/eunha9348/World-Social-Network-project/archive/refs/head
   QDRANT_API_KEY        (Secret · 운영자가 별도 전달)
   QDRANT_COLLECTION     polylogue
   ADMIN_EMAILS          yyjjhh9348@gmail.com
+  NEWS_FEEDS            (선택 · 비워도 됨)
+                        발행사 RSS 주소를 쉼표로 구분해 넣으면 Google News 검색과 함께
+                        사용합니다. 비우면 Google News 검색만 사용합니다.
 
   OPENAI_API_KEY 는 선택입니다. 설정하면 유해성 1차 검사에 OpenAI의 무료 moderation
   엔드포인트를 쓰고, 비우면 Gemini 분류기가 대신합니다. 둘 다 실패 시 메시지는 통과되지 않습니다.
   INGEST_TOKEN 도 선택입니다. 현재 반입은 브라우저 업로드로 하므로 없어도 됩니다.
 
 [배포 후 확인]
-1. https://polylogue-research.yyjjhh9348.chatgpt.site/admin/ingest 가 열리고
-   "원문 반입" 화면이 보일 것 (ADMIN_EMAILS 계정으로 로그인한 상태)
-2. 그 화면 상단에 현재 저장된 원문 수와 출처·언어 분포가 표시될 것
-3. 기존 검색 화면이 그대로 동작할 것
+1. 검색창에 "AI 반도체"를 입력 → 결과가 0건이면 그 자리에
+   "이 주제 지금 수집하기" 버튼이 보일 것
+2. 그 버튼을 누르면 10~30초 뒤 "N건을 새로 수집했습니다"가 뜨고 자동으로 재검색될 것
+3. /admin/ingest 가 열리고 상단에 저장된 원문 수와 출처·언어 분포가 표시될 것
+4. 기존 검색·번역·보고서 화면이 그대로 동작할 것
 
 [하지 말아야 할 것]
 - 코드 리팩터링, 의존성 버전 변경, 빌드 설정 변경
